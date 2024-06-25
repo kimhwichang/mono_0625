@@ -1,0 +1,18 @@
+inherit_from: "configs/mono/uHuman/base_config.yaml"
+
+Dataset:
+  dataset_path: "../Data/uHuman/apartment_scene/uHumans2_apartment_s1_00h"
+  Calibration:
+    fx: 415.69219
+    fy: 415.69219
+    cx: 360.0
+    cy: 240.0
+    k1: 0.0
+    k2: 0.0
+    p1: 0.0
+    p2: 0.0
+    k3: 0.0
+    distorted: False
+    width: 720
+    height: 480
+    depth_scale: 1.0
