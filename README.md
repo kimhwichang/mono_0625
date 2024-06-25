@@ -1,6 +1,3 @@
-<<<<<<< HEAD
-[comment]: <> (# Gaussian Splatting SLAM)
-
 <!-- PROJECT LOGO -->
 
 <p align="center">
