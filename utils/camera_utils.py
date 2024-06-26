@@ -27,9 +27,9 @@ class Camera(nn.Module):
         self.uid = uid
         self.device = device
 
-        T = torch.eye(4, device=device)
-        self.R = T[:3, :3]
-        self.T = T[:3, 3]
+        self.T_W = torch.eye(4, device=device)
+        self.R = self.T_W[:3, :3]
+        self.T = self.T_W[:3, 3]
         self.R_gt = gt_T[:3, :3]
         self.T_gt = gt_T[:3, 3]
 
