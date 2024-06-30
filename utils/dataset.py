@@ -217,7 +217,7 @@ class uHumanParser:
         pose_vecs = pose_data[:, 0:].astype(np.float64)
         self.color_paths, self.poses, self.depth_paths, self.frames = [], [], [], []
 
-        for i in range (num_data-2):
+        for i in range (585) : #(num_data-2):
            
             self.color_paths += [os.path.join(img_path, img_list[i])]
             self.depth_paths += [os.path.join(depth_path,img_list[i])]

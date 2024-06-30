@@ -503,9 +503,10 @@ class GaussianModel:
         return optimizable_tensors
 
     def prune_points(self, mask):
+  
         valid_points_mask = ~mask
         optimizable_tensors = self._prune_optimizer(valid_points_mask)
-
+  
         self._xyz = optimizable_tensors["xyz"]
         self._features_dc = optimizable_tensors["f_dc"]
         self._features_rest = optimizable_tensors["f_rest"]
@@ -514,11 +515,14 @@ class GaussianModel:
         self._rotation = optimizable_tensors["rotation"]
 
         self.xyz_gradient_accum = self.xyz_gradient_accum[valid_points_mask]
-
+   
         self.denom = self.denom[valid_points_mask]
         self.max_radii2D = self.max_radii2D[valid_points_mask]
+   
         self.unique_kfIDs = self.unique_kfIDs[valid_points_mask.cpu()]
+   
         self.n_obs = self.n_obs[valid_points_mask.cpu()]
+    
 
     def cat_tensors_to_optimizer(self, tensors_dict):
         optimizable_tensors = {}

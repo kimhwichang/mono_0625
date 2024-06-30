@@ -75,6 +75,7 @@ def eval_ate(frames, kf_ids, save_dir, iterations, final=False, monocular=False)
         pose = np.eye(4)
         pose[0:3, 0:3] = R.cpu().numpy()
         pose[0:3, 3] = T.cpu().numpy()
+        # print(pose)
         return pose
 
     for kf_id in kf_ids:
@@ -123,16 +124,18 @@ def eval_rendering(
     kf_indices,
     iteration="final",
 ):
-    interval = 10
+    interval = 5
     img_pred, img_gt, saved_frame_idx = [], [], []
-    end_idx = len(frames) - 1 if iteration == "final" or "before_opt" else iteration
+    begin_idx = kf_indices[0]
+    end_idx = kf_indices[-1]-1 
+    
     psnr_array, ssim_array, lpips_array = [], [], []
     cal_lpips = LearnedPerceptualImagePatchSimilarity(
         net_type="alex", normalize=True
     ).to("cuda")
     print("frame num = %i"%len(frames))
     print("gaussian num = %i " %(gaussians._xyz.shape[0]))
-    for idx in range(0, end_idx, interval):
+    for idx in range(begin_idx, end_idx, interval):
         if idx in kf_indices:
             continue
         saved_frame_idx.append(idx)
@@ -144,9 +147,9 @@ def eval_rendering(
         im = (image.detach().cpu().numpy().transpose((1, 2, 0)) * 255).astype(np.uint8)
         im2= cv2.cvtColor(im, cv2.COLOR_BGR2RGB)
         if(iteration=="before_opt"):
-            image_name = "/workspace/MonoGS/before/frame_%i.png"%idx 
-        if(iteration=="after_opt"):
-            image_name = "/workspace/MonoGS/after/frame_%i.png"%idx 
+            image_name = "/workspace/MonoGS/before2/frame_%i.png"%idx 
+        if(iteration=="final"):
+            image_name = "/workspace/MonoGS/after2/frame_%i.png"%idx 
         cv2.imwrite(image_name,im2)
 
         gt = (gt_image.cpu().numpy().transpose((1, 2, 0)) * 255).astype(np.uint8)
@@ -187,6 +190,8 @@ def eval_rendering(
         indent=4,
     )
     return output
+
+
 
 
 def save_gaussians(gaussians, name, iteration, final=False):

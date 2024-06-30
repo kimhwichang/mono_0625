@@ -9,9 +9,9 @@ class Submap(nn.Module):
     def __init__(self,config,id,first_):
         
         super().__init__()
-        self.idx = 1 #현재 몇개 째 들어왔는지
         self.uid = id
         self.first_ = first_
+        self.init_ = False
         self.config = config
         
         self.model_params = munchify(config["model_params"])
@@ -63,6 +63,7 @@ class Submap(nn.Module):
        
     def initialize_(self, cur_view, prev_view =None):
         if (self.first_):
+            print("cur_idx = %i"%cur_view.uid)
             self.kf_idx.append(cur_view.uid)
             self.viewpoints[cur_view.uid] = cur_view
             self.current_window.append(cur_view.uid)            
@@ -70,6 +71,8 @@ class Submap(nn.Module):
             self.set_anchor_frame_pose(cur_view)
             self.pose_list.append(self.T_CW)
         else :
+            print("prev_idx = %i"%prev_view.uid)
+            print("cur_idx = %i"%cur_view.uid)
             self.kf_idx.append(prev_view.uid)
             self.kf_idx.append(cur_view.uid)
             self.viewpoints[prev_view.uid] = prev_view
@@ -79,8 +82,7 @@ class Submap(nn.Module):
             self.set_anchor_frame(prev_view)
             self.set_anchor_frame_pose(prev_view)
             self.pose_list.append(self.T_CW)
-            self.pose_list.append(cur_view.T_W)
-            self.idx+=1        
+            self.pose_list.append(cur_view.T_W)       
         
     def local_BA(self) :
         return None
@@ -106,21 +108,17 @@ class Submap(nn.Module):
         size_ = len(self.kf_idx)
         return self.viewpoints[self.kf_idx[-1]]
     
+    def get_last_frame_idx(self):
+        
+        return self.kf_idx[-1]
+    
     def get_win_size(self):
         return len(self.current_window)
     
+    def get_submap_size(self):
+        return len(self.kf_idx)
+    
 
     def merge(self,submap_1 , submap_2) :
-        
-        self.anchor_frame = None      
-        self.T_CW = torch.eye(4)
-        self.initialilzed = False
-        self.viewpoints = {}
-        self.kf_idx_list =[]
-        self.occ_aware_visibility={}
-        self.keyframe_optimizers = None   
-        # remove all gaussians
-        self.gaussians.prune_points(self.gaussians.unique_kfIDs >= 0)
-        # remove everything from the queues
-        while not self.backend_queue.empty():
-            self.backend_queue.get()
+        #to do
+        return True
