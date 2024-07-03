@@ -110,6 +110,8 @@ class Camera(nn.Module):
     def update_RT(self, R, t):
         self.R = R.to(device=self.device)
         self.T = t.to(device=self.device)
+        # self.T_W[:3, :3] = self.R 
+        # self.T_W[:3, 3] = self.T   
 
     def compute_grad_mask(self, config):
         edge_threshold = config["Training"]["edge_threshold"]

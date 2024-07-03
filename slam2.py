@@ -111,7 +111,8 @@ class SLAM:
         #     gui_process.start()
         #     time.sleep(5)
         backend_process.start()       
-        self.frontend.run()     
+        self.frontend.run()    
+        # self.frontend.submap_list.append(self.frontend.active_submap) 
         print("frontend run break!")
         backend_queue.put(["pause"])
         
@@ -123,12 +124,14 @@ class SLAM:
         Log("Total time", start.elapsed_time(end) * 0.001, tag="Eval")
         Log("Total FPS", N_frames / (start.elapsed_time(end) * 0.001), tag="Eval")
         total_submap_num = len(self.frontend.submap_list)
+        if total_submap_num ==0 :
+            total_submap_num=1
         print("submap num = %i"%total_submap_num)
         print("final kf num = %i" %len(self.frontend.kf_indices))
         if self.eval_rendering:
             ATE = eval_ate(
-                    self.frontend.cameras,
-                    self.frontend.kf_indices,
+                    self.frontend.submap_list,
+                    self.frontend.active_submap,
                     self.save_dir,
                     0,
                     final=True,
@@ -141,8 +144,10 @@ class SLAM:
             for submap_ in self.frontend.submap_list:
                 self.gaussians = submap_.gaussians
                 kf_indices = submap_.kf_idx    
+                # anchor_frame_matrix = submap_.get_anchor_frame_pose()
                 rendering_result = eval_rendering(
                     self.frontend.cameras,
+                    # anchor_frame_matrix,
                     self.gaussians,
                     self.dataset,
                     self.save_dir,
@@ -166,8 +171,8 @@ class SLAM:
             )
 
             # re-used the frontend queue to retrive the gaussians from the backend.
-            # while not frontend_queue.empty():
-            #     frontend_queue.get()
+            while not frontend_queue.empty():
+                frontend_queue.get()
             # # backend_queue.put(["color_refinement"])
             # frontend_queue.put(["color_refinement"])
             # while True:

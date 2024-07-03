@@ -8,7 +8,7 @@ from gaussian_splatting.gaussian_renderer import render
 from gaussian_splatting.utils.graphics_utils import getProjectionMatrix2, getWorld2View2
 from gui import gui_utils
 from utils.camera_utils import Camera
-from utils.eval_utils import eval_ate, save_gaussians
+from utils.eval_utils import eval_ate2, save_gaussians
 from utils.logging_utils import Log
 from utils.multiprocessing_utils import clone_obj
 from utils.pose_utils import update_pose
@@ -216,7 +216,7 @@ class FrontEnd(mp.Process):
         cur_frame_visibility_filter,
         occ_aware_visibility,
     ):  
-        if cur_frame_idx % 8 == 0 :
+        if cur_frame_idx % 8 == 0  :
             return True
         else :
             return False
@@ -375,7 +375,7 @@ class FrontEnd(mp.Process):
                 #모든 데이터 다보면 save
                 if cur_frame_idx >= len(self.dataset):
                     if self.save_results:
-                        eval_ate(
+                        eval_ate2(
                             self.cameras,
                             self.kf_indices,
                             self.save_dir,
@@ -502,7 +502,7 @@ class FrontEnd(mp.Process):
                     and len(self.kf_indices) % self.save_trj_kf_intv == 0
                 ):
                     Log("Evaluating ATE at frame: ", cur_frame_idx)
-                    eval_ate(
+                    eval_ate2(
                         self.cameras,
                         self.kf_indices,
                         self.save_dir,
@@ -516,14 +516,14 @@ class FrontEnd(mp.Process):
                     duration = tic.elapsed_time(toc)
                     time.sleep(max(0.01, 1.0 / 3.0 - duration / 1000))
             else:
-                print("ffff")
+              
                 data = self.frontend_queue.get()
                 if data[0] == "sync_backend":
-                    print("sync")
+                
                     self.sync_backend(data)
 
                 elif data[0] == "keyframe":
-                    print("key")
+              
                     self.sync_backend(data)
                     self.requested_keyframe -= 1
 

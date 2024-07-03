@@ -6,14 +6,13 @@ from utils.slam_utils import image_gradient, image_gradient_mask
 from gaussian_splatting.scene.gaussian_model import GaussianModel
 
 class Submap(nn.Module):
-    def __init__(self,config,id,first_):
+    def __init__(self,config,device,id,first_):
         
         super().__init__()
         self.uid = id
         self.first_ = first_
-        self.init_ = False
         self.config = config
-        
+        self.device = device
         self.model_params = munchify(config["model_params"])
         self.opt_params = munchify(config["opt_params"])
         #self.pipeline_params = munchify(config["pipeline_params"])
@@ -27,6 +26,7 @@ class Submap(nn.Module):
         self.cameras_extent = 6.0
         self.anchor_frame = None      
         self.T_CW = torch.eye(4)
+        self.T_WC = torch.eye(4)
         self.initialilzed = False
         self.viewpoints = {}
         self.kf_idx =[]
@@ -63,26 +63,51 @@ class Submap(nn.Module):
        
     def initialize_(self, cur_view, prev_view =None):
         if (self.first_):
-            print("cur_idx = %i"%cur_view.uid)
+            print("cur_idx = %i"%cur_view.uid)       
             self.kf_idx.append(cur_view.uid)
-            self.viewpoints[cur_view.uid] = cur_view
-            self.current_window.append(cur_view.uid)            
-            self.set_anchor_frame(cur_view)
+            # self.set_anchor_frame(cur_view)
             self.set_anchor_frame_pose(cur_view)
+            self.set_anchor_frame_pose_inv(cur_view)         
+            self.viewpoints[cur_view.uid] = cur_view
+            self.current_window.append(cur_view.uid)    
             self.pose_list.append(self.T_CW)
         else :
-            print("prev_idx = %i"%prev_view.uid)
+            # print("prev_idx = %i"%prev_view.uid)
             print("cur_idx = %i"%cur_view.uid)
-            self.kf_idx.append(prev_view.uid)
-            self.kf_idx.append(cur_view.uid)
-            self.viewpoints[prev_view.uid] = prev_view
-            self.viewpoints[cur_view.uid] = cur_view
-            self.current_window.append(prev_view.uid)
-            self.current_window.append(cur_view.uid)
-            self.set_anchor_frame(prev_view)
-            self.set_anchor_frame_pose(prev_view)
+            # self.kf_idx.append(prev_view.uid)
+            self.kf_idx.append(cur_view.uid)            
+            # self.set_anchor_frame(cur_view)
+            self.set_anchor_frame_pose(cur_view)
+            self.set_anchor_frame_pose_inv(cur_view)
+            # print(self.get_anchor_frame_pose())
+            # prev_view.T_W =  self.get_anchor_frame_pose_inverse()@prev_view.T_W 
+            # self.viewpoints[prev_view.uid] = prev_view
+            # print(self.get_anchor_frame_pose())
+            temp_T = torch.eye(4)
+            temp_R= temp_T[:3,:3]
+            temp_t = temp_T[:3,3]
+            cur_view.update_RT(temp_R,temp_t)
+            self.viewpoints[cur_view.uid] = cur_view            
+            # self.current_window.append(prev_view.uid)
+            self.current_window.append(cur_view.uid)            
             self.pose_list.append(self.T_CW)
-            self.pose_list.append(cur_view.T_W)       
+            # self.pose_list.append(cur_view.T_W)     
+        # else :
+        #     print("prev_idx = %i"%prev_view.uid)
+        #     print("cur_idx = %i"%cur_view.uid)
+        #     self.kf_idx.append(prev_view.uid)
+        #     self.kf_idx.append(cur_view.uid)
+        #     self.set_anchor_frame(prev_view)
+        #     self.set_anchor_frame_pose(prev_view)
+        #     self.set_anchor_frame_pose_inv(prev_view)
+        #     prev_view.T_W =  self.get_anchor_frame_pose_inverse()@prev_view.T_W 
+        #     cur_view.T_W =  self.get_anchor_frame_pose_inverse()@cur_view.T_W         
+        #     self.viewpoints[prev_view.uid] = prev_view
+        #     self.viewpoints[cur_view.uid] = cur_view
+        #     self.current_window.append(prev_view.uid)
+        #     self.current_window.append(cur_view.uid)            
+        #     self.pose_list.append(self.T_CW)
+        #     self.pose_list.append(cur_view.T_W)         
         
     def local_BA(self) :
         return None
@@ -92,7 +117,12 @@ class Submap(nn.Module):
     
     def set_anchor_frame_pose(self,viewpoint) :
         
-        self.T_CW = viewpoint.T_W
+        self.T_CW[:3, :3] = viewpoint.R.clone() 
+        self.T_CW[:3, 3] = viewpoint.T.clone()             
+        
+    def set_anchor_frame_pose_inv(self,viewpoint) :
+        
+        self.T_WC = self.T_CW.clone().inverse()
             
     def get_kf_idx(self):
         return self.kf_idx
@@ -103,6 +133,8 @@ class Submap(nn.Module):
     def get_anchor_frame_pose(self) :
         return self.T_CW
     
+    def get_anchor_frame_pose_inverse(self) :
+        return self.T_WC
     
     def get_last_frame(self):
         size_ = len(self.kf_idx)

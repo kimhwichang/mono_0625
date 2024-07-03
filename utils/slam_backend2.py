@@ -29,6 +29,7 @@ class BackEnd(mp.Process):
         self.device = "cuda"
         self.dtype = torch.float32
         self.monocular = config["Training"]["monocular"]
+        self.submap_init = False
         self.first_ = True
         self.iteration_count = 0
         self.last_sent = 0
@@ -55,75 +56,75 @@ class BackEnd(mp.Process):
     #         self.backend_queue.get()
 
     def initialize_sub_map(self, viewpoint, first_ = True ,last_kf = None):
-        if (first_):
+        # if (first_):
             
-            self.active_submap = Submap(self.config,self.submap_id,first_)
-            self.active_submap.initialize_(viewpoint)
-            self.global_pose_list.append(self.active_submap.get_anchor_frame_pose())
+        self.active_submap = Submap(self.config,self.device,self.submap_id,first_)
+        self.active_submap.initialize_(viewpoint)
+        # self.global_pose_list.append(self.active_submap.get_anchor_frame_pose())
             # self.submap_list.append(self.active_submap)
             
-        else :
-            print("ss")
-            self.active_submap = Submap(self.config,self.submap_id,first_)
-            self.active_submap.initialize_(viewpoint,last_kf)           
-            self.global_pose_list.append(self.active_submap.get_anchor_frame_pose())
+        # else :
+            
+        #     self.active_submap = Submap(self.config,self.device,self.submap_id,first_)
+        #     self.active_submap.initialize_(viewpoint)#,last_kf)           
+        #     self.global_pose_list.append(self.active_submap.get_anchor_frame_pose())
       
-    def initialize_map(self):      
-        ck = True
-        for idx, viewpoint in self.active_submap.viewpoints.items():
-            for mapping_iteration in range(self.active_submap.init_itr_num):
-                self.iteration_count += 1
-                render_pkg = render(
-                    viewpoint, self.active_submap.gaussians, self.pipeline_params, self.active_submap.background
+    def initialize_map(self,viewpoint):      
+        # ck = True
+        # for idx, viewpoint in self.active_submap.viewpoints.items():
+        for mapping_iteration in range(self.active_submap.init_itr_num):
+            self.iteration_count += 1
+            render_pkg = render(
+                viewpoint, self.active_submap.gaussians, self.pipeline_params, self.active_submap.background
+            )
+            (
+                image,
+                viewspace_point_tensor,
+                visibility_filter,
+                radii,
+                depth,
+                opacity,
+                n_touched,
+            ) = (
+                render_pkg["render"],
+                render_pkg["viewspace_points"],
+                render_pkg["visibility_filter"],
+                render_pkg["radii"],
+                render_pkg["depth"],
+                render_pkg["opacity"],
+                render_pkg["n_touched"],
+            )  
+            loss_init = get_loss_mapping(
+                self.config, image, depth, viewpoint, opacity, initialization=True
+            )
+            loss_init.backward()        
+            with torch.no_grad():
+                self.active_submap.gaussians.max_radii2D[visibility_filter] = torch.max(
+                    self.active_submap.gaussians.max_radii2D[visibility_filter],
+                    radii[visibility_filter],
                 )
-                (
-                    image,
-                    viewspace_point_tensor,
-                    visibility_filter,
-                    radii,
-                    depth,
-                    opacity,
-                    n_touched,
-                ) = (
-                    render_pkg["render"],
-                    render_pkg["viewspace_points"],
-                    render_pkg["visibility_filter"],
-                    render_pkg["radii"],
-                    render_pkg["depth"],
-                    render_pkg["opacity"],
-                    render_pkg["n_touched"],
-                )  
-                loss_init = get_loss_mapping(
-                    self.config, image, depth, viewpoint, opacity, initialization=True
+                self.active_submap.gaussians.add_densification_stats(
+                    viewspace_point_tensor, visibility_filter
                 )
-                loss_init.backward()        
-                with torch.no_grad():
-                    self.active_submap.gaussians.max_radii2D[visibility_filter] = torch.max(
-                        self.active_submap.gaussians.max_radii2D[visibility_filter],
-                        radii[visibility_filter],
+                if mapping_iteration % self.active_submap.init_gaussian_update == 0 : #and ck:
+                    self.active_submap.gaussians.densify_and_prune(
+                        self.opt_params.densify_grad_threshold,
+                        self.active_submap.init_gaussian_th,
+                        self.active_submap.init_gaussian_extent,
+                        None,
                     )
-                    self.active_submap.gaussians.add_densification_stats(
-                        viewspace_point_tensor, visibility_filter
-                    )
-                    if mapping_iteration % self.active_submap.init_gaussian_update == 0 and ck:
-                        self.active_submap.gaussians.densify_and_prune(
-                            self.opt_params.densify_grad_threshold,
-                            self.active_submap.init_gaussian_th,
-                            self.active_submap.init_gaussian_extent,
-                            None,
-                        )
 
-                    if self.iteration_count == self.active_submap.init_gaussian_reset or (
-                        self.iteration_count == self.opt_params.densify_from_iter
-                    ):
-                        self.active_submap.gaussians.reset_opacity()
+                if self.iteration_count == self.active_submap.init_gaussian_reset or (
+                    self.iteration_count == self.opt_params.densify_from_iter
+                ):
+                    self.active_submap.gaussians.reset_opacity()
 
-                    self.active_submap.gaussians.optimizer.step()
-                    self.active_submap.gaussians.optimizer.zero_grad(set_to_none=True)
-            ck = False  
-            # print("f gaussian num = %i" %len(self.active_submap.gaussians._xyz))
-            # print(n_touched.shape)  
-            self.active_submap.occ_aware_visibility[idx] = (n_touched > 0).long()                              
+                self.active_submap.gaussians.optimizer.step()
+                self.active_submap.gaussians.optimizer.zero_grad(set_to_none=True)
+        # ck = False  
+        # print("f gaussian num = %i" %len(self.active_submap.gaussians._xyz))
+        # print(n_touched.shape)  
+        self.active_submap.occ_aware_visibility[viewpoint.uid] = (n_touched > 0).long()                              
 
         Log("Initialized sub map %i "%self.submap_id)
             # to do - 이전 gaussian 추종 
@@ -189,7 +190,7 @@ class BackEnd(mp.Process):
                 n_touched_acm.append(n_touched)
                 # print("map inner iter end")  
             # print("current_mapping loss")
-            for cam_idx in torch.randperm(len(random_viewpoint_stack)):#[:2]:
+            for cam_idx in torch.randperm(len(random_viewpoint_stack))[:2]:
                 viewpoint = random_viewpoint_stack[cam_idx]
                 render_pkg = render(
                     viewpoint, self.active_submap.gaussians, self.pipeline_params, self.active_submap.background
@@ -337,35 +338,34 @@ class BackEnd(mp.Process):
     def push_to_frontend(self, tag=None):
         self.last_sent = 0
         keyframes = []
-        for kf_idx in self.active_submap.current_window:
-            kf = self.active_submap.viewpoints[kf_idx]
-            keyframes.append((kf_idx, kf.R.clone(), kf.T.clone()))
+        # for kf_idx in self.active_submap.current_window:
+        #     kf = self.active_submap.viewpoints[kf_idx]
+        #     keyframes.append((kf_idx, kf.R.clone(), kf.T.clone()))
         
         if tag is None:
             tag = "sync_backend"
         
         # print("tag = "+tag)
-        if(tag =="new_map"):
-            print('-------backend-------')
+        # if(tag =="new_map"):
+        #     print('-------backend-------')
            
-            print("active_submap size = %i , cur_win_size = %i"%(self.active_submap.get_submap_size(),self.active_submap.get_win_size()))
-            print("active sub map idx [kf_idx] = ",end="")
-            for i  in self.active_submap.kf_idx :
-                print(" %i"%i,end="")
-            print(" ")
-            print("active sub map idx [viewpoints] = ",end="")
-            for idx, view in self.active_submap.viewpoints.items() :
-                print(" %i"%idx,end="")
-            print(" ")
-            print("active sub map idx [occ_aware_visibility] = ",end="")
-            for idx, view in self.active_submap.occ_aware_visibility.items() :
-                print(" %i"%idx,end="")
-            print(" ")            
-            print("current_window idx = ",end="")
-            for i  in self.active_submap.current_window :
-                print(" %i"%i,end="")
-            print(" ")    
-
+        #     print("active_submap size = %i , cur_win_size = %i"%(self.active_submap.get_submap_size(),self.active_submap.get_win_size()))
+        #     print("active sub map idx [kf_idx] = ",end="")
+        #     for i  in self.active_submap.kf_idx :
+        #         print(" %i"%i,end="")
+        #     print(" ")
+        #     print("active sub map idx [viewpoints] = ",end="")
+        #     for idx, view in self.active_submap.viewpoints.items() :
+        #         print(" %i"%idx,end="")
+        #     print(" ")
+        #     print("active sub map idx [occ_aware_visibility] = ",end="")
+        #     for idx, view in self.active_submap.occ_aware_visibility.items() :
+        #         print(" %i"%idx,end="")
+        #     print(" ")            
+        #     print("current_window idx = ",end="")
+        #     for i  in self.active_submap.current_window :
+        #         print(" %i"%i,end="")
+        #     print(" ")    
         msg = [tag, clone_obj(self.active_submap)]
         # msg = [tag, clone_obj(self.active_submap.gaussians), self.active_submap.occ_aware_visibility, keyframes, clone_obj(self.active_submap)]        self.frontend_queue.put(msg)
         self.frontend_queue.put(msg)
@@ -384,7 +384,7 @@ class BackEnd(mp.Process):
                 #     time.sleep(0.01)
                 #     continue
                 # print(self.active_submap.init_)
-                if (not self.active_submap.init_) :
+                if (not self.submap_init) :
                     time.sleep(0.01)
                     continue
 
@@ -408,16 +408,18 @@ class BackEnd(mp.Process):
                     self.pause = False
                 elif data[0] == "new_map":
                     cur_frame_idx = data[1]
-                    last_kf = data[2]
-                    viewpoint = data[3]
-                    depth_map = data[4]
+                    viewpoint = data[2]
+                    depth_map = data[3]
                     self.iteration_count = 0
+                    self.last_sent = 0
+                    self.initialized = not self.monocular
+                    # self.submap_init = False
                     # self.submap_list.append(self.active_submap)
-                    self.initialize_sub_map(viewpoint,False,last_kf)                                   
+                    self.initialize_sub_map(viewpoint,False)#,last_kf)                                   
                     self.add_next_kf(
                         cur_frame_idx, viewpoint, depth_map=depth_map, init=True
                     ) 
-                    self.initialize_map()                                   
+                    self.initialize_map(viewpoint)                                   
                     self.push_to_frontend("new_map")
                 elif data[0] == "color_refinement":
                     self.color_refinement()
@@ -432,7 +434,7 @@ class BackEnd(mp.Process):
                     self.add_next_kf(
                         cur_frame_idx, viewpoint, depth_map=depth_map, init=True
                     )   
-                    self.initialize_map()#cur_frame_idx,viewpoint)                                    
+                    self.initialize_map(viewpoint)#cur_frame_idx,viewpoint)                                    
                     self.push_to_frontend("init")
 
                 elif data[0] == "keyframe":
@@ -446,7 +448,7 @@ class BackEnd(mp.Process):
                     self.active_submap.current_window = current_window
                     self.active_submap.kf_idx = kf_idx
                     self.add_next_kf(cur_frame_idx, viewpoint, depth_map=depth_map)
-                    self.active_submap.init_ = True
+                    self.submap_init = True
                     opt_params = []
                     frames_to_optimize = self.config["Training"]["pose_window"]
                     iter_per_kf = 10

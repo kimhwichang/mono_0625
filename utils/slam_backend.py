@@ -145,7 +145,7 @@ class BackEnd(mp.Process):
         return render_pkg
 
     def map(self, current_window, prune=False, iters=1):
-        print("map")
+   
         if len(current_window) == 0:
             return
 
@@ -366,17 +366,10 @@ class BackEnd(mp.Process):
             kf = self.viewpoints[kf_idx]
             keyframes.append((kf_idx, kf.R.clone(), kf.T.clone()))
         if tag is None:
-            tag = "sync_backend"
-        print("12")
-        # print(len(self.gaussians._xyz))
-        # print(len(self.occ_aware_visibility))
-        # print(len(keyframes))
-        msg = [tag, clone_obj(self.gaussians), self.occ_aware_visibility, keyframes]
-        
-        print("13")            
+            tag = "sync_backend"        
+        msg = [tag, clone_obj(self.gaussians), self.occ_aware_visibility, keyframes]               
         self.frontend_queue.put(msg)
-        time.sleep(0.01)
-        print("14")
+        
 
     def run(self):
         
@@ -392,16 +385,16 @@ class BackEnd(mp.Process):
                 if self.single_thread:
                     time.sleep(0.01)
                     continue
-                print("1")
+           
                 self.map(self.current_window)
-                print("2")
+        
                 if self.last_sent >= 10:
-                    print("3")
+                 
                     self.map(self.current_window, prune=True, iters=10)
-                    print("4")
+                
                     self.push_to_frontend()
             else:
-                print("bbbb")
+            
                 data = self.backend_queue.get()
                 if data[0] == "stop":
                     break
@@ -492,9 +485,9 @@ class BackEnd(mp.Process):
                     self.keyframe_optimizers = torch.optim.Adam(opt_params)
 
                     self.map(self.current_window, iters=iter_per_kf)
-                    print("here1?")
+               
                     self.map(self.current_window, prune=True)
-                    print("here2?")
+              
                     self.push_to_frontend("keyframe")
                 else:
                     raise Exception("Unprocessed data", data)

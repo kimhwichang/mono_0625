@@ -17,7 +17,7 @@ from gaussian_splatting.utils.system_utils import mkdir_p
 from gui import gui_utils, slam_gui
 from utils.config_utils import load_config
 from utils.dataset import load_dataset
-from utils.eval_utils import eval_ate, eval_rendering, save_gaussians
+from utils.eval_utils import eval_ate2, eval_rendering, save_gaussians
 from utils.logging_utils import Log
 from utils.multiprocessing_utils import FakeQueue
 from utils.slam_backend import BackEnd
@@ -127,7 +127,7 @@ class SLAM:
         if self.eval_rendering:
             self.gaussians = self.frontend.gaussians
             kf_indices = self.frontend.kf_indices
-            ATE = eval_ate(
+            ATE = eval_ate2(
                 self.frontend.cameras,
                 self.frontend.kf_indices,
                 self.save_dir,
@@ -160,37 +160,37 @@ class SLAM:
             # re-used the frontend queue to retrive the gaussians from the backend.
             while not frontend_queue.empty():
                 frontend_queue.get()
-            backend_queue.put(["color_refinement"])
-            while True:
-                if frontend_queue.empty():
-                    time.sleep(0.01)
-                    continue
-                data = frontend_queue.get()
-                if data[0] == "sync_backend" and frontend_queue.empty():
-                    gaussians = data[1]
-                    self.gaussians = gaussians
-                    break
+            # backend_queue.put(["color_refinement"])
+            # while True:
+            #     if frontend_queue.empty():
+            #         time.sleep(0.01)
+            #         continue
+            #     data = frontend_queue.get()
+            #     if data[0] == "sync_backend" and frontend_queue.empty():
+            #         gaussians = data[1]
+            #         self.gaussians = gaussians
+            #         break
 
-            rendering_result = eval_rendering(
-                self.frontend.cameras,
-                self.gaussians,
-                self.dataset,
-                self.save_dir,
-                self.pipeline_params,
-                self.background,
-                kf_indices=kf_indices,
-                iteration="after_opt",
-            )
-            metrics_table.add_data(
-                "After",
-                rendering_result["mean_psnr"],
-                rendering_result["mean_ssim"],
-                rendering_result["mean_lpips"],
-                ATE,
-                FPS,
-            )
-            wandb.log({"Metrics": metrics_table})
-            save_gaussians(self.gaussians, self.save_dir, "final_after_opt", final=True)
+            # rendering_result = eval_rendering(
+            #     self.frontend.cameras,
+            #     self.gaussians,
+            #     self.dataset,
+            #     self.save_dir,
+            #     self.pipeline_params,
+            #     self.background,
+            #     kf_indices=kf_indices,
+            #     iteration="final",
+            # )
+            # metrics_table.add_data(
+            #     "After",
+            #     rendering_result["mean_psnr"],
+            #     rendering_result["mean_ssim"],
+            #     rendering_result["mean_lpips"],
+            #     ATE,
+            #     FPS,
+            # )
+            # wandb.log({"Metrics": metrics_table})
+            # save_gaussians(self.gaussians, self.save_dir, "final_after_opt", final=True)
 
         backend_queue.put(["stop"])
         backend_process.join()
