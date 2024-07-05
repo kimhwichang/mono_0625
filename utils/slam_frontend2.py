@@ -13,7 +13,7 @@ from utils.eval_utils import eval_ate, save_gaussians, eval_rendering
 from utils.logging_utils import Log
 from utils.multiprocessing_utils import clone_obj
 from utils.pose_utils import update_pose
-from utils.slam_utils import get_loss_tracking, get_median_depth
+from utils.slam_utils import get_loss_tracking, get_median_depth , get_median_depth_wo_opacity
 from utils.submap_utils import Submap
 
 
@@ -65,7 +65,8 @@ class FrontEnd(mp.Process):
 
     def add_new_keyframe(self, cur_frame_idx, viewpoint,depth=None, opacity=None, init=False):
         rgb_boundary_threshold = self.config["Training"]["rgb_boundary_threshold"]
-        self.kf_indices.append(cur_frame_idx)
+        if(init):
+            self.kf_indices.append(cur_frame_idx)
         # viewpoint = self.cameras[cur_frame_idx]
         gt_img = viewpoint.original_image.cuda()
         valid_rgb = (gt_img.sum(dim=0) > rgb_boundary_threshold)[None]
@@ -74,30 +75,46 @@ class FrontEnd(mp.Process):
                 initial_depth = 2 * torch.ones(1, gt_img.shape[1], gt_img.shape[2])
                 initial_depth += torch.randn_like(initial_depth) * 0.3
             else:
+                
                 depth = depth.detach().clone()
-                opacity = opacity.detach()
-                use_inv_depth = False
-                if use_inv_depth:
-                    inv_depth = 1.0 / depth
-                    inv_median_depth, inv_std, valid_mask = get_median_depth(
-                        inv_depth, opacity, mask=valid_rgb, return_std=True
-                    )
-                    invalid_depth_mask = torch.logical_or(
-                        inv_depth > inv_median_depth + inv_std,
-                        inv_depth < inv_median_depth - inv_std,
-                    )
-                    invalid_depth_mask = torch.logical_or(
-                        invalid_depth_mask, ~valid_mask
-                    )
-                    inv_depth[invalid_depth_mask] = inv_median_depth
-                    inv_initial_depth = inv_depth + torch.randn_like(
-                        inv_depth
-                    ) * torch.where(invalid_depth_mask, inv_std * 0.5, inv_std * 0.2)
-                    initial_depth = 1.0 / inv_initial_depth
-                else:
-                    median_depth, std, valid_mask = get_median_depth(
-                        depth, opacity, mask=valid_rgb, return_std=True
-                    )
+                if (init) :
+                    opacity = opacity.detach()
+                    use_inv_depth = False
+                    if use_inv_depth:
+                        inv_depth = 1.0 / depth
+                        inv_median_depth, inv_std, valid_mask = get_median_depth(
+                            inv_depth, opacity, mask=valid_rgb, return_std=True
+                        )
+                        invalid_depth_mask = torch.logical_or(
+                            inv_depth > inv_median_depth + inv_std,
+                            inv_depth < inv_median_depth - inv_std,
+                        )
+                        invalid_depth_mask = torch.logical_or(
+                            invalid_depth_mask, ~valid_mask
+                        )
+                        inv_depth[invalid_depth_mask] = inv_median_depth
+                        inv_initial_depth = inv_depth + torch.randn_like(
+                            inv_depth
+                        ) * torch.where(invalid_depth_mask, inv_std * 0.5, inv_std * 0.2)
+                        initial_depth = 1.0 / inv_initial_depth
+                    else:
+                        median_depth, std, valid_mask = get_median_depth(
+                            depth, opacity, mask=valid_rgb, return_std=True
+                        )
+                        invalid_depth_mask = torch.logical_or(
+                            depth > median_depth + std, depth < median_depth - std
+                        )
+                        invalid_depth_mask = torch.logical_or(
+                            invalid_depth_mask, ~valid_mask
+                        )
+                        depth[invalid_depth_mask] = median_depth
+                        initial_depth = depth + torch.randn_like(depth) * torch.where(
+                            invalid_depth_mask, std * 0.5, std * 0.2
+                        )
+                else :
+                    median_depth, std, valid_mask = get_median_depth_wo_opacity(
+                            depth, mask=valid_rgb, return_std=True
+                        )
                     invalid_depth_mask = torch.logical_or(
                         depth > median_depth + std, depth < median_depth - std
                     )
@@ -107,7 +124,7 @@ class FrontEnd(mp.Process):
                     depth[invalid_depth_mask] = median_depth
                     initial_depth = depth + torch.randn_like(depth) * torch.where(
                         invalid_depth_mask, std * 0.5, std * 0.2
-                    )
+                        )                   
 
                 initial_depth[~valid_rgb] = 0  # Ignore the invalid rgb pixels
             return initial_depth.cpu().numpy()[0]
@@ -161,21 +178,31 @@ class FrontEnd(mp.Process):
         # print(" ")  
         # print("--------------------------") 
         # prev = self.active_submap.viewpoints[self.last_kf]
+        # print("1------------------------")
+        # print(viewpoint.R)
+        # print(self.cameras[cur_frame_idx].R)
+        # print("------------------------1")
         prev = self.cameras[cur_frame_idx - self.use_every_n_frames]
-        if (self.new_map):
-            # print(self.active_submap.get_anchor_frame_pose())
-            # print("cur idx = %i" %(cur_frame_idx -1))
-            # print(self.active_submap.viewpoints[cur_frame_idx -1].T_W)
-            # GT = self.active_submap.viewpoints[cur_frame_idx-1].T_W
-            # GT = self.active_submap.get_anchor_frame_pose_inverse()@self.active_submap.get_anchor_frame_pose()
-            # print(GT) 
-            GT=torch.eye(4)
-            R_ = GT[:3,:3]
-            T_ = GT[3,:3]          
-            viewpoint.update_RT(R_, T_)
-            self.new_map = False
-        else :
-            viewpoint.update_RT(prev.R, prev.T)
+        viewpoint.update_RT(prev.R, prev.T)
+        # if (self.new_map):
+        #     # print(self.active_submap.get_anchor_frame_pose())
+        #     # print("cur idx = %i" %(cur_frame_idx -1))
+        #     # print(self.active_submap.viewpoints[cur_frame_idx -1].T_W)
+        #     # GT = self.active_submap.viewpoints[cur_frame_idx-1].T_W
+        #     # GT = self.active_submap.get_anchor_frame_pose_inverse()@self.active_submap.get_anchor_frame_pose()
+        #     # print(GT) 
+        #     GT=torch.eye(4)
+        #     R_ = GT[:3,:3]
+        #     T_ = GT[3,:3]          
+        #     viewpoint.update_RT(R_, T_)
+        #     self.new_map = False
+        # else :
+        #     viewpoint.update_RT(prev.R, prev.T)
+        # print("2------------------------")
+        # print(viewpoint.R)
+        # print(self.cameras[cur_frame_idx].R)
+        # print("------------------------2")
+        
         opt_params = []
         opt_params.append(
             {
@@ -237,6 +264,11 @@ class FrontEnd(mp.Process):
             #     )
             if converged:          
                 break          
+        # print("3------------------------")
+        # print(viewpoint.R)
+        # print(self.cameras[cur_frame_idx].R)
+        # print("------------------------3")
+        
         self.median_depth = get_median_depth(depth, opacity)
         return render_pkg
       
@@ -622,10 +654,11 @@ class FrontEnd(mp.Process):
                     #self.kf_indices.append(cur_frame_idx)
                     depth_map = self.add_new_keyframe(
                             cur_frame_idx,
-                            self.cameras[cur_frame_idx],
+                            viewpoint,
+                            #self.cameras[cur_frame_idx],
                             depth=render_pkg["depth"],
                             opacity=render_pkg["opacity"],
-                            init=False,
+                            init=True,
                     ) 
                     
                     create_new_submap = self.is_new_submap(cur_frame_idx,
@@ -633,7 +666,8 @@ class FrontEnd(mp.Process):
                     curr_visibility,
                     self.occ_aware_visibility,viewpoint,depth_map)
                     if(create_new_submap):
-                        
+                        depth_map = self.add_new_keyframe(cur_frame_idx, viewpoint,depth=render_pkg["depth"], init=False)
+                        # depth_map = self.add_new_keyframe(cur_frame_idx, viewpoint, init=False)
                         self.reqeust_new_submap(cur_frame_idx,viewpoint,depth_map)
                     else :
                         self.add_to_submap( cur_frame_idx,
@@ -657,25 +691,25 @@ class FrontEnd(mp.Process):
                         self.request_keyframe(
                             cur_frame_idx, viewpoint, self.active_submap.current_window, depth_map, self.active_submap.kf_idx)
                     
-                    # print("kf idx = ",end="")
-                    # for i  in self.kf_indices :
-                    #     print(" %i"%i,end="")
-                    # print(" ")
-                    # print("last_kf_idx  = %i"%self.last_kf)
-                    # print("total submap num  = %i"%len(self.submap_list))
-                    # print("active_submap size = %i , cur_win_size = %i"%(self.active_submap.get_submap_size(),self.active_submap.get_win_size()))
-                    # print("active sub map idx [kf_idx] = ",end="")
-                    # for i  in self.active_submap.kf_idx :
-                    #     print(" %i"%i,end="")
-                    # print(" ")
-                    # print("active sub map idx [viewpoints] = ",end="")
-                    # for idx, view in self.active_submap.viewpoints.items() :
-                    #     print(" %i"%idx,end="")
-                    # print(" ")
-                    # print("current_window idx = ",end="")
-                    # for i  in self.active_submap.current_window :
-                    #     print(" %i"%i,end="")
-                    # print(" ")    
+                    print("kf idx = ",end="")
+                    for i  in self.kf_indices :
+                        print(" %i"%i,end="")
+                    print(" ")
+                    print("last_kf_idx  = %i"%self.last_kf)
+                    print("total submap num  = %i"%len(self.submap_list))
+                    print("active_submap size = %i , cur_win_size = %i"%(self.active_submap.get_submap_size(),self.active_submap.get_win_size()))
+                    print("active sub map idx [kf_idx] = ",end="")
+                    for i  in self.active_submap.kf_idx :
+                        print(" %i"%i,end="")
+                    print(" ")
+                    print("active sub map idx [viewpoints] = ",end="")
+                    for idx, view in self.active_submap.viewpoints.items() :
+                        print(" %i"%idx,end="")
+                    print(" ")
+                    print("current_window idx = ",end="")
+                    for i  in self.active_submap.current_window :
+                        print(" %i"%i,end="")
+                    print(" ")    
                     
                 else:
                     # print("cur frame is not keyframe!")
@@ -689,7 +723,7 @@ class FrontEnd(mp.Process):
                     and len(self.kf_indices) % self.save_trj_kf_intv == 0
                 ):
                     Log("Evaluating ATE at frame: ", cur_frame_idx)
-                    
+                    # print("len of kf indices = %i "%len(self.kf_indices))
                     eval_ate(                        
                         self.submap_list,
                         self.active_submap,

@@ -9,7 +9,7 @@ from gaussian_splatting.utils.graphics_utils import getProjectionMatrix2, getWor
 from gui import gui_utils
 from gaussian_splatting.utils.loss_utils import l1_loss, ssim
 from utils.camera_utils import Camera
-from utils.eval_utils import eval_ate, save_gaussians
+from utils.eval_utils import eval_ate, save_gaussians, eval_rendering
 from utils.logging_utils import Log
 from utils.multiprocessing_utils import clone_obj
 from utils.pose_utils import update_pose
@@ -46,8 +46,7 @@ class FrontEnd(mp.Process):
 
         self.last_kf = 0
         self.gaussians = None
-        self.cameras = dict()
-        self.cameras2= dict()
+        self.cameras = dict()      
         self.device = "cuda:0"
         self.pause = False
 
@@ -167,8 +166,10 @@ class FrontEnd(mp.Process):
             # print(self.active_submap.get_anchor_frame_pose())
             # print("cur idx = %i" %(cur_frame_idx -1))
             # print(self.active_submap.viewpoints[cur_frame_idx -1].T_W)
-            GT = self.active_submap.viewpoints[cur_frame_idx-1].T_W
-            
+            # GT = self.active_submap.viewpoints[cur_frame_idx-1].T_W
+            # GT = self.active_submap.get_anchor_frame_pose_inverse()@self.active_submap.get_anchor_frame_pose()
+            # print(GT) 
+            GT=torch.eye(4)
             R_ = GT[:3,:3]
             T_ = GT[3,:3]          
             viewpoint.update_RT(R_, T_)
@@ -205,7 +206,6 @@ class FrontEnd(mp.Process):
             }
         )        
         pose_optimizer = torch.optim.Adam(opt_params)
-        T_ = torch.eye(4, device=self.device)
         for tracking_itr in range(self.tracking_itr_num):
             
             render_pkg = render(
@@ -225,7 +225,6 @@ class FrontEnd(mp.Process):
             with torch.no_grad():
                 pose_optimizer.step()
                 converged = update_pose(viewpoint)
-                
             # if tracking_itr % 10 == 0:
             #     self.q_main2vis.put(
             #         gui_utils.GaussianPacket(
@@ -236,23 +235,8 @@ class FrontEnd(mp.Process):
             #             else np.zeros((viewpoint.image_height, viewpoint.image_width)),
             #         )
             #     )
-            if converged:
-                
-                T_[:3, :3] = viewpoint.R.clone() 
-                T_[:3, 3] = viewpoint.T.clone()                
-                T_W = self.active_submap.get_anchor_frame_pose()@T_          
-                R_ = T_W[:3, :3]
-                t_ = T_W[:3, 3]                
-                self.cameras2[cur_frame_idx].update_RT(R_,t_)
-                break
-            
-     
-        T_[:3, :3] = viewpoint.R.clone() 
-        T_[:3, 3] = viewpoint.T.clone()  
-        T_W = self.active_submap.get_anchor_frame_pose()@T_   
-        R_ = T_W[:3, :3]
-        t_ = T_W[:3, 3]                
-        self.cameras2[cur_frame_idx].update_RT(R_,t_)                
+            if converged:          
+                break          
         self.median_depth = get_median_depth(depth, opacity)
         return render_pkg
       
@@ -426,7 +410,7 @@ class FrontEnd(mp.Process):
         
         #self.last_kf= self.active_submap.kf_idx[-1]
         last_kf = self.active_submap.get_last_frame()
-        msg = ["new_map", cur_frame_idx, clone_obj(last_kf),viewpoint,depth_map]
+        msg = ["new_map", cur_frame_idx,viewpoint,depth_map]
         self.backend_queue.put(msg)
         print("[f-n]last kf = %i" % self.last_kf)
         print("f->b  : tag = new map")
@@ -445,23 +429,12 @@ class FrontEnd(mp.Process):
         self.occ_aware_visibility = self.active_submap.occ_aware_visibility
         # print("sync_backend!")        
         for kf_id in self.active_submap.current_window:
-            kf = self.active_submap.viewpoints[kf_id]
-            T_ = torch.eye(4, device=self.device)
-            T_[:3, :3] = kf.R.clone() 
-            T_[:3, 3] = kf.T.clone()
-            # print(self.active_submap.get_anchor_frame_pose())
-            T_W = self.active_submap.get_anchor_frame_pose()@T_
-            # print(T_W)
-            R_ = T_W[:3, :3]
-            t_ = T_W[:3, 3]
-            self.cameras[kf_id].update_RT(kf.R.clone(), kf.T.clone())
-            self.cameras2[kf_id].update_RT(R_,t_)
-            
+            kf = self.active_submap.viewpoints[kf_id]           
+            self.cameras[kf_id].update_RT(kf.R.clone(), kf.T.clone())       
             
 
     def cleanup(self, cur_frame_idx): # R,T는 놔두고 나머지만 지움
-        self.cameras[cur_frame_idx].clean()
-      
+        self.cameras[cur_frame_idx].clean()        
         if cur_frame_idx % 10 == 0:
             torch.cuda.empty_cache()
 
@@ -485,17 +458,17 @@ class FrontEnd(mp.Process):
             
             #print("current_window %i "%len(self.current_window))
             # visualize관련 queue 부분
-            if self.q_vis2main.empty():
-                if self.pause:
-                    continue
-            else:
-                data_vis2main = self.q_vis2main.get()
-                self.pause = data_vis2main.flag_pause
-                if self.pause:
-                    self.backend_queue.put(["pause"])
-                    continue
-                else:
-                    self.backend_queue.put(["unpause"])
+            # if self.q_vis2main.empty():
+            #     if self.pause:
+            #         continue
+            # else:
+            #     data_vis2main = self.q_vis2main.get()
+            #     self.pause = data_vis2main.flag_pause
+            #     if self.pause:
+            #         self.backend_queue.put(["pause"])
+            #         continue
+            #     else:
+            #         self.backend_queue.put(["unpause"])
                     
             #여기부터 진짜 시작
             if self.frontend_queue.empty():
@@ -503,15 +476,35 @@ class FrontEnd(mp.Process):
                 # print("1")
                 #모든 데이터 다보면 save
                 if cur_frame_idx >= len(self.dataset):
+                    self.submap_list.append(self.active_submap)
                     if self.save_results:
                         eval_ate(
-                            self.cameras2,
-                            self.kf_indices,
+                            self.submap_list,
+                            self.active_submap,
                             self.save_dir,
                             0,
                             final=True,
                             monocular=self.monocular,
                         )
+                        total_psnr = 0
+                        total_ssim = 0
+                        total_lpips = 0
+                        
+                        rendering_result = eval_rendering(
+                        self.cameras,
+                        # anchor_frame_matrix,
+                        self.active_submap.gaussians,
+                        self.dataset,
+                        self.save_dir,
+                        self.pipeline_params,
+                        self.active_submap.background,
+                        kf_indices=self.active_submap.kf_idx,
+                        iteration="before_opt",
+                        )
+                        total_psnr+=rendering_result["mean_psnr"]
+                        total_ssim +=rendering_result["mean_ssim"]
+                        total_lpips +=rendering_result["mean_lpips"]  
+                        print("PSNR = %f" %total_psnr)
                         # save_gaussians(
                         #     self.active_subamap.gaussians, self.save_dir, "final", final=True
                         # )
@@ -539,8 +532,7 @@ class FrontEnd(mp.Process):
                     self.dataset, cur_frame_idx, projection_matrix
                 )
                 viewpoint.compute_grad_mask(self.config)
-                self.cameras[cur_frame_idx] = viewpoint
-                self.cameras2[cur_frame_idx] = viewpoint
+                self.cameras[cur_frame_idx] = viewpoint               
                 # print("3")
                 #시작할때, 혹은 reset이 필요할때 -> initialize 다시함
                 if self.reset:
@@ -665,7 +657,7 @@ class FrontEnd(mp.Process):
                         self.request_keyframe(
                             cur_frame_idx, viewpoint, self.active_submap.current_window, depth_map, self.active_submap.kf_idx)
                     
-                    print("kf idx = ",end="")
+                    # print("kf idx = ",end="")
                     # for i  in self.kf_indices :
                     #     print(" %i"%i,end="")
                     # print(" ")
@@ -698,12 +690,12 @@ class FrontEnd(mp.Process):
                 ):
                     Log("Evaluating ATE at frame: ", cur_frame_idx)
                     
-                    eval_ate(
-                        
-                        self.cameras2,
-                        self.kf_indices,
+                    eval_ate(                        
+                        self.submap_list,
+                        self.active_submap,
                         self.save_dir,
                         cur_frame_idx,
+                        False,
                         monocular=self.monocular,
                     )
                 toc.record()               
@@ -730,7 +722,7 @@ class FrontEnd(mp.Process):
                     
                 elif data[0] == "new_map":
                     print("b->f  : tag = new_map")
-                    self.initialized = True
+                    self.initialized = not self.monocular #True
                     self.sync_backend(data)
                     self.requested_new_submap = False
                     self.new_map = True

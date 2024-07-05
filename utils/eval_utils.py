@@ -282,7 +282,8 @@ def eval_ate(submap_list, sub_, save_dir, iterations, final=False, monocular=Fal
     if(len(submap_list)==0): 
         for kf_id in sub_.kf_idx:      
             kf = sub_.viewpoints[kf_id]
-            pose_est = np.linalg.inv(gen_pose_matrix2(kf.R, kf.T,sub_.get_anchor_frame_pose()))
+            # pose_est = np.linalg.inv(gen_pose_matrix2(kf.R, kf.T,sub_.get_anchor_frame_pose()))
+            pose_est = np.linalg.inv(gen_pose_matrix(kf.R, kf.T))
             pose_gt = np.linalg.inv(gen_pose_matrix(kf.R_gt, kf.T_gt))
 
             trj_id.append(kf_id)
@@ -297,7 +298,8 @@ def eval_ate(submap_list, sub_, save_dir, iterations, final=False, monocular=Fal
             for kf_id in submap_.kf_idx:          
         
                 kf = submap_.viewpoints[kf_id]
-                pose_est = np.linalg.inv(gen_pose_matrix2(kf.R, kf.T,submap_.get_anchor_frame_pose()))
+                # pose_est = np.linalg.inv(gen_pose_matrix2(kf.R, kf.T,submap_.get_anchor_frame_pose()))
+                pose_est = np.linalg.inv(gen_pose_matrix(kf.R, kf.T))
                 pose_gt = np.linalg.inv(gen_pose_matrix(kf.R_gt, kf.T_gt))
 
                 trj_id.append(kf_id)
@@ -311,7 +313,8 @@ def eval_ate(submap_list, sub_, save_dir, iterations, final=False, monocular=Fal
             for kf_id in sub_.kf_idx:          
 
                 kf = sub_.viewpoints[kf_id]
-                pose_est = np.linalg.inv(gen_pose_matrix2(kf.R, kf.T,sub_.get_anchor_frame_pose()))
+                # pose_est = np.linalg.inv(gen_pose_matrix2(kf.R, kf.T,sub_.get_anchor_frame_pose()))
+                pose_est = np.linalg.inv(gen_pose_matrix(kf.R, kf.T))
                 pose_gt = np.linalg.inv(gen_pose_matrix(kf.R_gt, kf.T_gt))
 
                 trj_id.append(kf_id)

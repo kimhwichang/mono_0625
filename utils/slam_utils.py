@@ -140,3 +140,13 @@ def get_median_depth(depth, opacity=None, mask=None, return_std=False):
     if return_std:
         return valid_depth.median(), valid_depth.std(), valid
     return valid_depth.median()
+
+def get_median_depth_wo_opacity(depth, mask=None, return_std=False):
+    depth = depth.detach().clone()    
+    valid = depth > 0    
+    if mask is not None:
+        valid = torch.logical_and(valid, mask)
+    valid_depth = depth[valid]
+    if return_std:
+        return valid_depth.median(), valid_depth.std(), valid
+    return valid_depth.median()

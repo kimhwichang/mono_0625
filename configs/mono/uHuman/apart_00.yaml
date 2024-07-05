@@ -15,4 +15,4 @@ Dataset:
     distorted: False
     width: 720
     height: 480
-    depth_scale: 1.0
+    #depth_scale: 1.0

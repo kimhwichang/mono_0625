@@ -312,6 +312,7 @@ class MonocularDataset(BaseDataset):
             image = cv2.remap(image, self.map1x, self.map1y, cv2.INTER_LINEAR)
 
         if self.has_depth:
+            print("has depth")
             depth_path = self.depth_paths[idx]
             depth = np.array(Image.open(depth_path)) / self.depth_scale
 

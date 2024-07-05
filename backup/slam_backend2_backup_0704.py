@@ -419,8 +419,7 @@ class BackEnd(mp.Process):
                     self.add_next_kf(
                         cur_frame_idx, viewpoint, depth_map=depth_map, init=True
                     ) 
-                    self.initialize_map(viewpoint)     
-                                                  
+                    self.initialize_map(viewpoint)                                   
                     self.push_to_frontend("new_map")
                 elif data[0] == "color_refinement":
                     self.color_refinement()
@@ -435,7 +434,7 @@ class BackEnd(mp.Process):
                     self.add_next_kf(
                         cur_frame_idx, viewpoint, depth_map=depth_map, init=True
                     )   
-                    self.initialize_map(viewpoint)#cur_frame_idx,viewpoint)                                                 
+                    self.initialize_map(viewpoint)#cur_frame_idx,viewpoint)                                    
                     self.push_to_frontend("init")
 
                 elif data[0] == "keyframe":

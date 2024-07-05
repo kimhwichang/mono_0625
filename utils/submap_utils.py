@@ -73,7 +73,7 @@ class Submap(nn.Module):
             self.pose_list.append(self.T_CW)
         else :
             # print("prev_idx = %i"%prev_view.uid)
-            print("cur_idx = %i"%cur_view.uid)
+            print("cur_idx___ = %i"%cur_view.uid)
             # self.kf_idx.append(prev_view.uid)
             self.kf_idx.append(cur_view.uid)            
             # self.set_anchor_frame(cur_view)
@@ -83,10 +83,16 @@ class Submap(nn.Module):
             # prev_view.T_W =  self.get_anchor_frame_pose_inverse()@prev_view.T_W 
             # self.viewpoints[prev_view.uid] = prev_view
             # print(self.get_anchor_frame_pose())
-            temp_T = torch.eye(4)
-            temp_R= temp_T[:3,:3]
-            temp_t = temp_T[:3,3]
-            cur_view.update_RT(temp_R,temp_t)
+            
+            # print(cur_view.R)
+            # print(cur_view.T)
+            # temp_T = torch.eye(4)
+            # temp_R= temp_T[:3,:3]
+            # temp_t = temp_T[:3,3]
+            # cur_view.update_RT(temp_R,temp_t)
+            # print(cur_view.R)           
+            # print(cur_view.T)
+            
             self.viewpoints[cur_view.uid] = cur_view            
             # self.current_window.append(prev_view.uid)
             self.current_window.append(cur_view.uid)            
