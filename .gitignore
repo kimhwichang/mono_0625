@@ -9,6 +9,8 @@ diff_rasterization/diff_rast.egg-info
 diff_rasterization/dist
 after2
 before2
+aaa
+before3
 
 cameras.json
 *.ply

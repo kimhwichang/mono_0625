@@ -85,7 +85,7 @@ class TUMParser:
 
         image_data = self.parse_list(image_list)
         depth_data = self.parse_list(depth_list)
-        pose_list = "/workspace/Data/TUM/rgbd_dataset_freiburg1_desk/groundtruth.txt"
+        # pose_list = "/workspace/Data/TUM/rgbd_dataset_freiburg2_xyz/groundtruth.txt"
         pose_data = self.parse_list(pose_list, skiprows=1)
         pose_vecs = pose_data[:, 0:].astype(np.float64)
 
@@ -104,6 +104,7 @@ class TUMParser:
         self.color_paths, self.poses, self.depth_paths, self.frames = [], [], [], []
 
         for ix in indicies:
+           
             (i, j, k) = associations[ix]
             self.color_paths += [os.path.join(datapath, image_data[i, 1])]
             self.depth_paths += [os.path.join(datapath, depth_data[j, 1])]
@@ -217,7 +218,7 @@ class uHumanParser:
         pose_vecs = pose_data[:, 0:].astype(np.float64)
         self.color_paths, self.poses, self.depth_paths, self.frames = [], [], [], []
 
-        for i in range (1052): #(num_data-2):
+        for i in range (num_data-2):
            
             self.color_paths += [os.path.join(img_path, img_list[i])]
             self.depth_paths += [os.path.join(depth_path,img_list[i])]
@@ -312,7 +313,7 @@ class MonocularDataset(BaseDataset):
             image = cv2.remap(image, self.map1x, self.map1y, cv2.INTER_LINEAR)
 
         if self.has_depth:
-            print("has depth")
+            # print("has depth")
             depth_path = self.depth_paths[idx]
             depth = np.array(Image.open(depth_path)) / self.depth_scale
 

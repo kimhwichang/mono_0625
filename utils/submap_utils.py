@@ -1,4 +1,5 @@
 import torch
+import gc
 from torch import nn
 from munch import munchify
 from gaussian_splatting.utils.graphics_utils import getProjectionMatrix2, getWorld2View2
@@ -15,8 +16,9 @@ class Submap(nn.Module):
         self.device = device
         self.model_params = munchify(config["model_params"])
         self.opt_params = munchify(config["opt_params"])
+        self.use_spherical_harmonics = self.config["Training"]["spherical_harmonics"]
         #self.pipeline_params = munchify(config["pipeline_params"])
-
+        self.model_params.sh_degree = 3 if self.use_spherical_harmonics else 0
         self.gaussians = GaussianModel(self.model_params.sh_degree, config=self.config)
         self.gaussians.init_lr(6.0)
         self.gaussians.training_setup(self.opt_params)
@@ -37,8 +39,20 @@ class Submap(nn.Module):
         self.set_hyperparams()
         # self.device = "cuda"
         # self.dtype = torch.float32
+    
+    def reset(self):
         
+        for i,v in self.viewpoints.items():
+            v.clean2()
+            
         
+        for i,vis in self.occ_aware_visibility.items():
+            vis.to("cpu")
+            torch.cuda.empty_cache()
+            gc.collect()
+        
+        self.gaussians.reset()
+        self.gaussians = None
 
     def set_hyperparams(self):
         self.save_results = self.config["Results"]["save_results"]
@@ -61,59 +75,110 @@ class Submap(nn.Module):
         self.size_threshold = self.config["Training"]["size_threshold"]
         
        
-    def initialize_(self, cur_view, prev_view =None):
+    # def initialize_(self, cur_view, last_anchor_pose = None, prev_view= None):
+    #     if (self.first_):
+    #         print("cur_idx = %i"%cur_view.uid)       
+    #         self.kf_idx.append(cur_view.uid)
+    #         # self.set_anchor_frame(cur_view)
+    #         self.set_anchor_frame_pose(cur_view)
+    #         self.set_anchor_frame_pose_inv()         
+    #         self.viewpoints[cur_view.uid] = cur_view
+    #         self.current_window.append(cur_view.uid)    
+    #         self.pose_list.append(self.T_CW)
+    #     else :
+    #         print("prev_idx = %i"%prev_view.uid)
+    #         print("cur_idx___ = %i"%cur_view.uid)
+    #         self.kf_idx.append(prev_view.uid)
+    #         self.kf_idx.append(cur_view.uid)            
+    #         # self.set_anchor_frame(cur_view)
+    #         if last_anchor_pose is None :
+    #             self.set_anchor_frame_pose(prev_view)
+    #             self.set_anchor_frame_pose_inv()
+    #         else :
+    #             self.set_anchor_frame_pose(prev_view, last_anchor_pose)
+    #             self.set_anchor_frame_pose(cur_view)
+    #             self.set_anchor_frame_pose_inv()
+            
+    #         temp_prev_t = self.gen_pose_matrix(prev_view.R, prev_view.T)
+    #         temp_cur_t = self.gen_pose_matrix(cur_view.R, cur_view.T)
+            
+    #         temp_prev_t =  temp_prev_t @ self.get_anchor_frame_pose_inverse()
+    #         temp_cur_t  =  temp_cur_t @ self.get_anchor_frame_pose_inverse()
+        
+    #         pr = temp_prev_t[:3,:3]
+    #         pt = temp_prev_t[:3,3]
+    #         prev_view.update_RT(pr,pt)
+            
+    #         cr = temp_cur_t[:3,:3]
+    #         ct = temp_cur_t[:3,3]
+    #         cur_view.update_RT(cr,ct)
+                     
+    #         # print(cur_view.R)           
+    #         # print(cur_view.T)
+           
+    #         self.viewpoints[cur_view.uid] = cur_view       
+    #         self.viewpoints[prev_view.uid] = prev_view        
+    #         self.current_window.append(prev_view.uid)
+    #         self.current_window.append(cur_view.uid)            
+    
+    
+    def initialize_(self, cur_view, last_anchor_pose = None):
         if (self.first_):
             print("cur_idx = %i"%cur_view.uid)       
             self.kf_idx.append(cur_view.uid)
             # self.set_anchor_frame(cur_view)
             self.set_anchor_frame_pose(cur_view)
-            self.set_anchor_frame_pose_inv(cur_view)         
+            self.set_anchor_frame_pose_inv()         
             self.viewpoints[cur_view.uid] = cur_view
             self.current_window.append(cur_view.uid)    
             self.pose_list.append(self.T_CW)
-        else :
-            # print("prev_idx = %i"%prev_view.uid)
-            print("cur_idx___ = %i"%cur_view.uid)
-            # self.kf_idx.append(prev_view.uid)
+        else :         
+            print("cur_idx___ = %i"%cur_view.uid)           
             self.kf_idx.append(cur_view.uid)            
             # self.set_anchor_frame(cur_view)
-            self.set_anchor_frame_pose(cur_view)
-            self.set_anchor_frame_pose_inv(cur_view)
-            # print(self.get_anchor_frame_pose())
-            # prev_view.T_W =  self.get_anchor_frame_pose_inverse()@prev_view.T_W 
-            # self.viewpoints[prev_view.uid] = prev_view
-            # print(self.get_anchor_frame_pose())
-            
+            if last_anchor_pose is None :
+                self.set_anchor_frame_pose(cur_view)
+                self.set_anchor_frame_pose_inv()
+            else :
+                self.set_anchor_frame_pose(cur_view, last_anchor_pose)
+                self.set_anchor_frame_pose_inv()
+  
             # print(cur_view.R)
             # print(cur_view.T)
-            # temp_T = torch.eye(4)
-            # temp_R= temp_T[:3,:3]
-            # temp_t = temp_T[:3,3]
-            # cur_view.update_RT(temp_R,temp_t)
+            
+            temp_T = torch.eye(4)
+            temp_R= temp_T[:3,:3]
+            temp_t = temp_T[:3,3]
+            cur_view.update_RT(temp_R,temp_t)
+            
             # print(cur_view.R)           
             # print(cur_view.T)
-            
-            self.viewpoints[cur_view.uid] = cur_view            
-            # self.current_window.append(prev_view.uid)
+            cur_view.cam_rot_delta = nn.Parameter(
+                torch.zeros(3, requires_grad=True, device=self.device)
+            )
+            cur_view.cam_trans_delta = nn.Parameter(
+                torch.zeros(3, requires_grad=True, device=self.device)
+            )
+
+            cur_view.exposure_a = nn.Parameter(
+                torch.tensor([0.0], requires_grad=True, device=self.device)
+            )
+            cur_view.exposure_b = nn.Parameter(
+                torch.tensor([0.0], requires_grad=True, device=self.device)
+            )
+
+            self.viewpoints[cur_view.uid] = cur_view     
             self.current_window.append(cur_view.uid)            
             self.pose_list.append(self.T_CW)
             # self.pose_list.append(cur_view.T_W)     
-        # else :
-        #     print("prev_idx = %i"%prev_view.uid)
-        #     print("cur_idx = %i"%cur_view.uid)
-        #     self.kf_idx.append(prev_view.uid)
-        #     self.kf_idx.append(cur_view.uid)
-        #     self.set_anchor_frame(prev_view)
-        #     self.set_anchor_frame_pose(prev_view)
-        #     self.set_anchor_frame_pose_inv(prev_view)
-        #     prev_view.T_W =  self.get_anchor_frame_pose_inverse()@prev_view.T_W 
-        #     cur_view.T_W =  self.get_anchor_frame_pose_inverse()@cur_view.T_W         
-        #     self.viewpoints[prev_view.uid] = prev_view
-        #     self.viewpoints[cur_view.uid] = cur_view
-        #     self.current_window.append(prev_view.uid)
-        #     self.current_window.append(cur_view.uid)            
-        #     self.pose_list.append(self.T_CW)
-        #     self.pose_list.append(cur_view.T_W)         
+    
+    def gen_pose_matrix(self,R, T):
+        pose = torch.eye(4)
+        pose[0:3, 0:3] = R.to("cpu")
+        pose[0:3, 3] = T.to("cpu")
+        # print(pose)
+        return pose
+       
         
     def local_BA(self) :
         return None
@@ -121,12 +186,14 @@ class Submap(nn.Module):
     def set_anchor_frame(self,viewpoint) :
         self.anchor_frmae = viewpoint
     
-    def set_anchor_frame_pose(self,viewpoint) :
+    def set_anchor_frame_pose(self,viewpoint,last_anchor_pose=None) :
         
         self.T_CW[:3, :3] = viewpoint.R.clone() 
-        self.T_CW[:3, 3] = viewpoint.T.clone()             
+        self.T_CW[:3, 3] = viewpoint.T.clone()   
+        if last_anchor_pose is not None:
+            self.T_CW = self.T_CW@last_anchor_pose          
         
-    def set_anchor_frame_pose_inv(self,viewpoint) :
+    def set_anchor_frame_pose_inv(self) :
         
         self.T_WC = self.T_CW.clone().inverse()
             
@@ -143,7 +210,7 @@ class Submap(nn.Module):
         return self.T_WC
     
     def get_last_frame(self):
-        size_ = len(self.kf_idx)
+        # size_ = len(self.kf_idx)
         return self.viewpoints[self.kf_idx[-1]]
     
     def get_last_frame_idx(self):

@@ -104,6 +104,7 @@ class FrontEnd(mp.Process):
                 initial_depth[~valid_rgb] = 0  # Ignore the invalid rgb pixels
             return initial_depth.cpu().numpy()[0]
         # use the observed depth
+        
         initial_depth = torch.from_numpy(viewpoint.depth).unsqueeze(0)
         initial_depth[~valid_rgb.cpu()] = 0  # Ignore the invalid rgb pixels
         return initial_depth[0].numpy()
@@ -120,7 +121,11 @@ class FrontEnd(mp.Process):
             self.backend_queue.get()
 
         # Initialise the frame at the ground truth pose
-        viewpoint.update_RT(viewpoint.R_gt, viewpoint.T_gt)
+        GT = torch.eye(4)
+        R_ = torch.eye(3)
+        T_ = GT[3,:3]        
+        viewpoint.update_RT(R_, T_)
+        # viewpoint.update_RT(viewpoint.R_gt, viewpoint.T_gt)
 
         self.kf_indices = []
         depth_map = self.add_new_keyframe(cur_frame_idx, init=True)
@@ -216,31 +221,31 @@ class FrontEnd(mp.Process):
         cur_frame_visibility_filter,
         occ_aware_visibility,
     ):  
-        if cur_frame_idx % 8 == 0  :
-            return True
-        else :
-            return False
-        # kf_translation = self.config["Training"]["kf_translation"]
-        # kf_min_translation = self.config["Training"]["kf_min_translation"]
-        # kf_overlap = self.config["Training"]["kf_overlap"]
+        # if cur_frame_idx % 8 == 0  :
+        #     return True
+        # else :
+        #     return False
+        kf_translation = self.config["Training"]["kf_translation"]
+        kf_min_translation = self.config["Training"]["kf_min_translation"]
+        kf_overlap = self.config["Training"]["kf_overlap"]
 
-        # curr_frame = self.cameras[cur_frame_idx]
-        # last_kf = self.cameras[last_keyframe_idx]
-        # pose_CW = getWorld2View2(curr_frame.R, curr_frame.T)
-        # last_kf_CW = getWorld2View2(last_kf.R, last_kf.T)
-        # last_kf_WC = torch.linalg.inv(last_kf_CW)
-        # dist = torch.norm((pose_CW @ last_kf_WC)[0:3, 3])
-        # dist_check = dist > kf_translation * self.median_depth
-        # dist_check2 = dist > kf_min_translation * self.median_depth
+        curr_frame = self.cameras[cur_frame_idx]
+        last_kf = self.cameras[last_keyframe_idx]
+        pose_CW = getWorld2View2(curr_frame.R, curr_frame.T)
+        last_kf_CW = getWorld2View2(last_kf.R, last_kf.T)
+        last_kf_WC = torch.linalg.inv(last_kf_CW)
+        dist = torch.norm((pose_CW @ last_kf_WC)[0:3, 3])
+        dist_check = dist > kf_translation * self.median_depth
+        dist_check2 = dist > kf_min_translation * self.median_depth
 
-        # union = torch.logical_or(
-        #     cur_frame_visibility_filter, occ_aware_visibility[last_keyframe_idx]
-        # ).count_nonzero()
-        # intersection = torch.logical_and(
-        #     cur_frame_visibility_filter, occ_aware_visibility[last_keyframe_idx]
-        # ).count_nonzero()
-        # point_ratio_2 = intersection / union
-        # return (point_ratio_2 < kf_overlap and dist_check2) or dist_check
+        union = torch.logical_or(
+            cur_frame_visibility_filter, occ_aware_visibility[last_keyframe_idx]
+        ).count_nonzero()
+        intersection = torch.logical_and(
+            cur_frame_visibility_filter, occ_aware_visibility[last_keyframe_idx]
+        ).count_nonzero()
+        point_ratio_2 = intersection / union
+        return (point_ratio_2 < kf_overlap and dist_check2) or dist_check
     
     
 
@@ -451,25 +456,22 @@ class FrontEnd(mp.Process):
                     curr_visibility,
                     self.occ_aware_visibility,
                 )
-                # if len(self.current_window) < self.window_size:
-                #     union = torch.logical_or(
-                #         curr_visibility, self.occ_aware_visibility[last_keyframe_idx]
-                #     ).count_nonzero()
-                #     intersection = torch.logical_and(
-                #         curr_visibility, self.occ_aware_visibility[last_keyframe_idx]
-                #     ).count_nonzero()
-                #     point_ratio = intersection / union
-                #     create_kf = (
-                #         check_time
-                #         and point_ratio < self.config["Training"]["kf_overlap"]
-                #     )
+                if len(self.current_window) < self.window_size:
+                    union = torch.logical_or(
+                        curr_visibility, self.occ_aware_visibility[last_keyframe_idx]
+                    ).count_nonzero()
+                    intersection = torch.logical_and(
+                        curr_visibility, self.occ_aware_visibility[last_keyframe_idx]
+                    ).count_nonzero()
+                    point_ratio = intersection / union
+                    create_kf = (
+                        check_time
+                        and point_ratio < self.config["Training"]["kf_overlap"]
+                    )
                 if self.single_thread:
                     create_kf = check_time and create_kf
                 if create_kf:
-                    print("kf idx = ",end="")
-                    for i  in self.kf_indices :
-                        print(" %i"%i,end="")
-                    print(" ")
+                    
                     self.current_window, removed = self.add_to_window(
                         cur_frame_idx,
                         curr_visibility,
@@ -488,6 +490,10 @@ class FrontEnd(mp.Process):
                         opacity=render_pkg["opacity"],
                         init=False,
                     )
+                    print("kf idx = ",end="")
+                    for i  in self.kf_indices :
+                        print(" %i"%i,end="")
+                    print(" ")
                     self.request_keyframe(
                         cur_frame_idx, viewpoint, self.current_window, depth_map
                     )

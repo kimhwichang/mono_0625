@@ -1,6 +1,6 @@
 import torch
 from torch import nn
-
+import gc
 from gaussian_splatting.utils.graphics_utils import getProjectionMatrix2, getWorld2View2
 from utils.slam_utils import image_gradient, image_gradient_mask
 
@@ -152,5 +152,30 @@ class Camera(nn.Module):
         self.cam_rot_delta = None
         self.cam_trans_delta = None
 
+        self.exposure_a = None
+        self.exposure_b = None
+        
+    def clean2(self):
+        self.original_image.to("cpu")
+        torch.cuda.empty_cache()
+        gc.collect()
+        self.original_image = None
+        self.depth = None
+        self.grad_mask = None
+        
+        self.cam_rot_delta.to("cpu")
+        torch.cuda.empty_cache()
+        gc.collect()
+        self.cam_trans_delta.to("cpu")
+        torch.cuda.empty_cache()
+        gc.collect()
+        self.exposure_a.to("cpu")
+        torch.cuda.empty_cache()
+        gc.collect()
+        self.exposure_b.to("cpu")
+        torch.cuda.empty_cache()
+        gc.collect()
+        self.cam_rot_delta = None
+        self.cam_trans_delta = None
         self.exposure_a = None
         self.exposure_b = None

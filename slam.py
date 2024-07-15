@@ -62,10 +62,6 @@ class SLAM:
         bg_color = [0, 0, 0]
         self.background = torch.tensor(bg_color, dtype=torch.float32, device="cuda")
 
-  
-
-
-
         frontend_queue = mp.Queue()
         backend_queue = mp.Queue()
 

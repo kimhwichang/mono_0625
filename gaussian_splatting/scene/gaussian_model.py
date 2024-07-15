@@ -10,7 +10,7 @@
 #
 
 import os
-
+import gc
 import numpy as np
 import open3d as o3d
 import torch
@@ -73,6 +73,32 @@ class GaussianModel:
         symm = strip_symmetric(actual_covariance)
         return symm
 
+    def reset(self) :
+        self._xyz.to("cpu")
+        torch.cuda.empty_cache()
+        gc.collect()
+        self._features_dc.to("cpu")
+        torch.cuda.empty_cache()
+        gc.collect()
+        self._features_rest.to("cpu")
+        torch.cuda.empty_cache()
+        gc.collect()
+        self._scaling.to("cpu")
+        torch.cuda.empty_cache()
+        gc.collect()
+        self._rotation.to("cpu")
+        torch.cuda.empty_cache()
+        gc.collect()
+        self._opacity.to("cpu")
+        torch.cuda.empty_cache()
+        gc.collect()
+        self.max_radii2D.to("cpu")
+        torch.cuda.empty_cache()
+        gc.collect()
+        self.xyz_gradient_accum.to("cpu")
+        torch.cuda.empty_cache()
+        gc.collect()
+        
     @property
     def get_scaling(self):
         return self.scaling_activation(self._scaling)

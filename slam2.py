@@ -31,7 +31,7 @@ class SLAM:
         end = torch.cuda.Event(enable_timing=True)
 
         start.record()
-
+      
         self.config = config
         self.save_dir = save_dir
         model_params = munchify(config["model_params"])
@@ -41,9 +41,7 @@ class SLAM:
             model_params,
             opt_params,
             pipeline_params,
-        )
-
-    
+        )    
         self.live_mode = self.config["Dataset"]["type"] == "realsense"
         self.monocular = self.config["Dataset"]["sensor_type"] == "monocular"
         self.use_spherical_harmonics = self.config["Training"]["spherical_harmonics"]
@@ -52,8 +50,7 @@ class SLAM:
             self.use_gui = True
         self.eval_rendering = self.config["Results"]["eval_rendering"]
 
-        model_params.sh_degree = 3 if self.use_spherical_harmonics else 0
-        
+        model_params.sh_degree = 3 if self.use_spherical_harmonics else 0     
         self.dataset = load_dataset(
             model_params, model_params.source_path, config=config
         )
@@ -63,8 +60,7 @@ class SLAM:
         frontend_queue = mp.Queue()
         backend_queue = mp.Queue()
         # refined_queue = mp.Queue()
-        # slam_queue = mp.Queue()
-        
+        # slam_queue = mp.Queue()        
         q_main2vis = mp.Queue() if self.use_gui else FakeQueue()
         q_vis2main = mp.Queue() if self.use_gui else FakeQueue()
 
@@ -141,6 +137,7 @@ class SLAM:
             total_psnr = 0
             total_ssim = 0
             total_lpips = 0
+            total_frame_num = 0
             for submap_ in self.frontend.submap_list:
                 self.gaussians = submap_.gaussians
                 kf_indices = submap_.kf_idx    
@@ -156,16 +153,17 @@ class SLAM:
                     kf_indices=kf_indices,
                     iteration="before_opt",
                 )
-                total_psnr+=rendering_result["mean_psnr"]
-                total_ssim +=rendering_result["mean_ssim"]
-                total_lpips +=rendering_result["mean_lpips"]  
+                total_psnr+=rendering_result["mean_psnr"]*rendering_result["total frame num"]
+                total_ssim +=rendering_result["mean_ssim"]*rendering_result["total frame num"]
+                total_lpips +=rendering_result["mean_lpips"]*rendering_result["total frame num"]  
+                total_frame_num +=rendering_result["total frame num"]
             columns = ["tag", "psnr", "ssim", "lpips", "RMSE ATE", "FPS"]
             metrics_table = wandb.Table(columns=columns)
             metrics_table.add_data(
                 "Before",
-                total_psnr/total_submap_num,
-                total_ssim/total_submap_num,
-                total_lpips/total_submap_num,
+                total_psnr/total_frame_num,
+                total_ssim/total_frame_num,
+                total_lpips/total_frame_num,
                 ATE,
                 FPS,
             )
@@ -184,7 +182,7 @@ class SLAM:
             #         # gaussians = data[1]
             #         # self.gaussians = gaussians
             #         break
-            print("before_psnr = %f" %float(total_psnr/total_submap_num))
+            print("before_psnr = %f" %float(total_psnr/total_frame_num))
             # self.frontend.color_refinement()
             # total_psnr = 0
             # total_ssim = 0
