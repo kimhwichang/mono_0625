@@ -74,6 +74,18 @@ class Submap(nn.Module):
         self.gaussian_reset = self.config["Training"]["gaussian_reset"]
         self.size_threshold = self.config["Training"]["size_threshold"]
         
+        # print(self.init_itr_num)
+        # print(self.init_gaussian_update)
+        # print(self.init_gaussian_reset)
+        # print(self.init_gaussian_th)
+        # print(self.init_gaussian_extent)
+        # print(self.mapping_itr_num)
+        # print(self.gaussian_update_every)
+        # print(self.gaussian_update_offset)
+        # print(self.gaussian_th)
+        # print(self.gaussian_extent)
+        # print(self.gaussian_reset)
+        # print(self.size_threshold)
        
     # def initialize_(self, cur_view, last_anchor_pose = None, prev_view= None):
     #     if (self.first_):

@@ -133,9 +133,8 @@ class FrontEnd(mp.Process):
         self.reset = False
 
     def tracking(self, cur_frame_idx, viewpoint):
-
+        # print("i = %i" %(cur_frame_idx - self.use_every_n_frames))   
         prev = self.cameras[cur_frame_idx - self.use_every_n_frames]
-
         viewpoint.update_RT(prev.R, prev.T)
 
         opt_params = []
@@ -194,22 +193,13 @@ class FrontEnd(mp.Process):
      
             with torch.no_grad():
                 pose_optimizer.step()
-                converged = update_pose(viewpoint)
-           
-            # if tracking_itr % 10 == 0:
-            #     self.q_main2vis.put(
-            #         gui_utils.GaussianPacket(
-            #             current_frame=viewpoint,
-            #             gtcolor=viewpoint.original_image,
-            #             gtdepth=viewpoint.depth
-            #             if not self.monocular
-            #             else np.zeros((viewpoint.image_height, viewpoint.image_width)),
-            #         )
-            #     )
+                converged = update_pose(viewpoint)     
          
             if converged:
+               
                 break
-                       
+            
+            
         self.median_depth = get_median_depth(depth, opacity)
   
         return render_pkg
@@ -312,6 +302,7 @@ class FrontEnd(mp.Process):
             window.remove(removed_frame)
 
         return window, removed_frame
+   
 
     def request_keyframe(self, cur_frame_idx, viewpoint, current_window, depthmap):
         msg = ["keyframe", cur_frame_idx, viewpoint, current_window, depthmap]
@@ -328,12 +319,14 @@ class FrontEnd(mp.Process):
         self.requested_init = True
 
     def sync_backend(self, data):
+       
         self.gaussians = data[1]
         occ_aware_visibility = data[2]
         keyframes = data[3]
         self.occ_aware_visibility = occ_aware_visibility
 
         for kf_id, kf_R, kf_T in keyframes:
+            # print(kf_id)
             self.cameras[kf_id].update_RT(kf_R.clone(), kf_T.clone())
 
     def cleanup(self, cur_frame_idx):
@@ -358,20 +351,7 @@ class FrontEnd(mp.Process):
         toc = torch.cuda.Event(enable_timing=True)
 
         while True:
-            #print("current_window %i "%len(self.current_window))
-            # visualize관련 queue 부분
-            # if self.q_vis2main.empty():
-            #     if self.pause:
-            #         continue
-            # else:
-            #     data_vis2main = self.q_vis2main.get()
-            #     self.pause = data_vis2main.flag_pause
-            #     if self.pause:
-            #         self.backend_queue.put(["pause"])
-            #         continue
-            #     else:
-            #         self.backend_queue.put(["unpause"])
-                    
+
             #여기부터 진짜 시작
             if self.frontend_queue.empty():
                 # print("empty")
@@ -405,6 +385,7 @@ class FrontEnd(mp.Process):
                 
                 # initialize안되었는데 keyframe 요청받으면 continue
                 if not self.initialized and self.requested_keyframe > 0:
+                   
                     time.sleep(0.01)
                     continue
                 
@@ -446,7 +427,8 @@ class FrontEnd(mp.Process):
                     cur_frame_idx += 1
                     continue
 
-                last_keyframe_idx = self.current_window[0]
+                last_keyframe_idx = self.current_window[-1]
+                # print("last = %i " %last_keyframe_idx)
                 check_time = (cur_frame_idx - last_keyframe_idx) >= self.kf_interval
                 curr_visibility = (render_pkg["n_touched"] > 0).long()
                 
@@ -460,10 +442,13 @@ class FrontEnd(mp.Process):
                     union = torch.logical_or(
                         curr_visibility, self.occ_aware_visibility[last_keyframe_idx]
                     ).count_nonzero()
+                    # print(union)
                     intersection = torch.logical_and(
                         curr_visibility, self.occ_aware_visibility[last_keyframe_idx]
                     ).count_nonzero()
+                    # print(intersection)
                     point_ratio = intersection / union
+                    print("point_ratio = %f , check_time= %i" %(point_ratio,check_time))
                     create_kf = (
                         check_time
                         and point_ratio < self.config["Training"]["kf_overlap"]
@@ -494,6 +479,19 @@ class FrontEnd(mp.Process):
                     for i  in self.kf_indices :
                         print(" %i"%i,end="")
                     print(" ")
+                    # print("viewpoints = ",end="")
+                    # for idx   in self.kf_indices :
+                    #     print(" %i"%idx,end="")
+                    # print(" ")
+                    # print("current_window idx = ",end="")
+                    # for i  in self.current_window :
+                    #     print(" %i"%i,end="")
+                    # print(" ")  
+                    
+                    # print(viewpoint.R)
+                    # print(viewpoint.T)
+                    # print(self.cameras[cur_frame_idx].R)
+                    # print(self.cameras[cur_frame_idx].T)
                     self.request_keyframe(
                         cur_frame_idx, viewpoint, self.current_window, depth_map
                     )
@@ -522,7 +520,7 @@ class FrontEnd(mp.Process):
                     duration = tic.elapsed_time(toc)
                     time.sleep(max(0.01, 1.0 / 3.0 - duration / 1000))
             else:
-              
+                print("b num of queue = %i " %self.frontend_queue.qsize())
                 data = self.frontend_queue.get()
                 if data[0] == "sync_backend":
                 

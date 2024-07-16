@@ -64,7 +64,20 @@ class BackEnd(mp.Process):
             if "single_thread" in self.config["Dataset"]
             else False
         )
-
+        
+        # print(self.init_itr_num)
+        # print(self.init_gaussian_update)
+        # print(self.init_gaussian_reset)
+        # print(self.init_gaussian_th)
+        # print(self.init_gaussian_extent)
+        # print(self.mapping_itr_num)
+        # print(self.gaussian_update_every)
+        # print(self.gaussian_update_offset)
+        # print(self.gaussian_th)
+        # print(self.gaussian_extent)
+        # print(self.gaussian_reset)
+        # print(self.size_threshold)
+        
     def add_next_kf(self, frame_idx, viewpoint, init=False, scale=2.0, depth_map=None):
         self.gaussians.extend_from_pcd_seq(
             viewpoint, kf_id=frame_idx, init=init, scale=scale, depthmap=depth_map
@@ -366,7 +379,8 @@ class BackEnd(mp.Process):
             kf = self.viewpoints[kf_idx]
             keyframes.append((kf_idx, kf.R.clone(), kf.T.clone()))
         if tag is None:
-            tag = "sync_backend"        
+            tag = "sync_backend"         
+        # print("[keyframe # %i] bb : tag = %s " %(last_ ,tag))  
         msg = [tag, clone_obj(self.gaussians), self.occ_aware_visibility, keyframes]               
         self.frontend_queue.put(msg)
         
@@ -446,6 +460,7 @@ class BackEnd(mp.Process):
                         else:
                             iter_per_kf = self.mapping_itr_num
                     for cam_idx in range(len(self.current_window)):
+                        
                         if self.current_window[cam_idx] == 0:
                             continue
                         viewpoint = self.viewpoints[current_window[cam_idx]]
@@ -483,7 +498,7 @@ class BackEnd(mp.Process):
                             }
                         )
                     self.keyframe_optimizers = torch.optim.Adam(opt_params)
-
+                    # print("iter_per_kf = %i" %iter_per_kf)
                     self.map(self.current_window, iters=iter_per_kf)
                
                     self.map(self.current_window, prune=True)

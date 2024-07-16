@@ -86,7 +86,8 @@ def eval_ate(submap_list, sub_, save_dir, iterations, final=False, monocular=Fal
         M= M.numpy()
         pose = pose@M
         return pose
-
+    print("submaplist num = %i" %len(submap_list))
+    
     if(len(submap_list)==0): 
         for kf_id in sub_.kf_idx:      
             kf = sub_.viewpoints[kf_id]
