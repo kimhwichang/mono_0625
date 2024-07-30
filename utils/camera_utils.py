@@ -61,7 +61,24 @@ class Camera(nn.Module):
         )
 
         self.projection_matrix = projection_matrix.to(device=device)
+    
+    def reset_view_param(self):
+        self.cam_rot_delta = nn.Parameter(
+                torch.zeros(3, requires_grad=True, device=self.device)
+        )
+        self.cam_trans_delta = nn.Parameter(
+            torch.zeros(3, requires_grad=True, device=self.device)
+        )
 
+        self.exposure_a = nn.Parameter(
+            torch.tensor([0.0], requires_grad=True, device=self.device)
+        )
+        self.exposure_b = nn.Parameter(
+            torch.tensor([0.0], requires_grad=True, device=self.device)
+        )
+    
+    
+    
     @staticmethod
     def init_from_dataset(dataset, idx, projection_matrix):
         gt_color, gt_depth, gt_pose = dataset[idx]
@@ -154,6 +171,35 @@ class Camera(nn.Module):
 
         self.exposure_a = None
         self.exposure_b = None
+    
+    
+    def viewpoints_to_cpu(self):
+        tmp_original_image = self.original_image.detach().to("cpu")
+        tmp_cam_rot_delta = self.cam_rot_delta.detach().to("cpu")
+        tmp_cam_trans_delta = self.cam_trans_delta.detach().to("cpu")
+        tmp_exposure_a = self.exposure_a.detach().to("cpu")
+        tmp_exposure_b = self.exposure_b.detach().to("cpu")
+        tmp_R = self.R.detach().to("cpu")
+        tmp_T = self.T.detach().to("cpu")
+        tmp_grad_mask = self.grad_mask.detach().to("cpu")
+        del self.original_image
+        del self.cam_rot_delta
+        del self.cam_trans_delta
+        del self.exposure_a
+        del self.exposure_b
+        del self.R
+        del self.T
+        del self.grad_mask
+        torch.cuda.empty_cache()
+        gc.collect()
+        self.original_image = tmp_original_image
+        self.cam_rot_delta = tmp_cam_rot_delta
+        self.cam_trans_delta = tmp_cam_trans_delta
+        self.exposure_a = tmp_exposure_a
+        self.exposure_b = tmp_exposure_b
+        self.R = tmp_R
+        self.T = tmp_T
+        self.grad_mask= tmp_grad_mask
         
     def clean2(self):
         self.original_image.to("cpu")

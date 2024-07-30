@@ -21,7 +21,9 @@ class ReplicaParser:
         self.input_folder = input_folder
         self.color_paths = sorted(glob.glob(f"{self.input_folder}/results/frame*.jpg"))
         self.depth_paths = sorted(glob.glob(f"{self.input_folder}/results/depth*.png"))
-        self.n_img = len(self.color_paths)
+        # self.n_img = len(self.color_paths[256:500])
+        self.n_img = len(self.color_paths[:500])
+        print(self.n_img)
         self.load_poses(f"{self.input_folder}/traj.txt")
 
     def load_poses(self, path):
@@ -30,7 +32,8 @@ class ReplicaParser:
             lines = f.readlines()
 
         frames = []
-        for i in range(self.n_img):
+        # for i in range(256,500):
+        for i in range(500):#self.n_img):
             line = lines[i]
             pose = np.array(list(map(float, line.split()))).reshape(4, 4)
             pose = np.linalg.inv(pose)
@@ -218,7 +221,7 @@ class uHumanParser:
         pose_vecs = pose_data[:, 0:].astype(np.float64)
         self.color_paths, self.poses, self.depth_paths, self.frames = [], [], [], []
 
-        for i in range (num_data-2):
+        for i in range (num_data-2):#(720,1400):
            
             self.color_paths += [os.path.join(img_path, img_list[i])]
             self.depth_paths += [os.path.join(depth_path,img_list[i])]

@@ -27,11 +27,11 @@ from utils.slam_refined import Refine
 
 class SLAM:
     def __init__(self, config, save_dir=None):
-        start = torch.cuda.Event(enable_timing=True)
-        end = torch.cuda.Event(enable_timing=True)
 
+        start = torch.cuda.Event(enable_timing=True)
+        end = torch.cuda.Event(enable_timing=True)           
         start.record()
-      
+     
         self.config = config
         self.save_dir = save_dir
         model_params = munchify(config["model_params"])
@@ -54,6 +54,7 @@ class SLAM:
         self.dataset = load_dataset(
             model_params, model_params.source_path, config=config
         )
+      
         # bg_color = [0, 0, 0]
         # self.background = torch.tensor(bg_color, dtype=torch.float32, device="cuda")
         self.submap_list = []
@@ -76,6 +77,7 @@ class SLAM:
         self.frontend.dataset = self.dataset
         # self.frontend.background = self.background
         self.frontend.pipeline_params = self.pipeline_params
+        self.frontend.opt_params = self.opt_params
         self.frontend.frontend_queue = frontend_queue
         self.frontend.backend_queue = backend_queue
         #self.frontend.refined_queue = refined_queue
@@ -116,6 +118,7 @@ class SLAM:
         torch.cuda.synchronize()
         # empty the frontend queue
         N_frames = len(self.frontend.cameras)
+        FPS = 0.1
         FPS = N_frames / (start.elapsed_time(end) * 0.001)
         Log("Total time", start.elapsed_time(end) * 0.001, tag="Eval")
         Log("Total FPS", N_frames / (start.elapsed_time(end) * 0.001), tag="Eval")

@@ -154,8 +154,8 @@ class SLAM:
             )
 
             # re-used the frontend queue to retrive the gaussians from the backend.
-            while not frontend_queue.empty():
-                frontend_queue.get()
+            # while not frontend_queue.empty():
+            #     frontend_queue.get()
             # backend_queue.put(["color_refinement"])
             # while True:
             #     if frontend_queue.empty():

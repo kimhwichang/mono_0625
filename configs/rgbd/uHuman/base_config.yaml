@@ -24,8 +24,8 @@ Training:
   init_gaussian_th: 0.005
   init_gaussian_extent: 30
   # Tracking and Mapping
-  tracking_itr_num: 200 #100
-  mapping_itr_num: 300 #150
+  tracking_itr_num: 100 #100
+  mapping_itr_num: 150 #150
   gaussian_update_every: 150
   gaussian_update_offset: 50
   gaussian_th: 0.7
@@ -33,7 +33,7 @@ Training:
   gaussian_reset: 2001
   size_threshold: 20
   kf_interval: 5
-  max_kf_size: 44
+  max_kf_size: 45
   window_size: 8
   pose_window: 3
   edge_threshold: 1.1

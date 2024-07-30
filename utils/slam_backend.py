@@ -82,7 +82,9 @@ class BackEnd(mp.Process):
         self.gaussians.extend_from_pcd_seq(
             viewpoint, kf_id=frame_idx, init=init, scale=scale, depthmap=depth_map
         )
+        
 
+        
     def reset(self):
         self.iteration_count = 0
         self.occ_aware_visibility = {}
@@ -336,42 +338,7 @@ class BackEnd(mp.Process):
                     update_pose(viewpoint)
         return gaussian_split
 
-    def color_refinement(self):
-        Log("Starting color refinement")
-
-        iteration_total = 26000
-        
-        for iteration in tqdm(range(1, iteration_total + 1)):
-            viewpoint_idx_stack = list(self.viewpoints.keys())
-            viewpoint_cam_idx = viewpoint_idx_stack.pop(
-                random.randint(0, len(viewpoint_idx_stack) - 1)
-            )
-            viewpoint_cam = self.viewpoints[viewpoint_cam_idx]
-            render_pkg = render(
-                viewpoint_cam, self.gaussians, self.pipeline_params, self.background
-            )
-            image, visibility_filter, radii = (
-                render_pkg["render"],
-                render_pkg["visibility_filter"],
-                render_pkg["radii"],
-            )
-
-            gt_image = viewpoint_cam.original_image.cuda()
-            Ll1 = l1_loss(image, gt_image)
-            loss = (1.0 - self.opt_params.lambda_dssim) * (
-                Ll1
-            ) + self.opt_params.lambda_dssim * (1.0 - ssim(image, gt_image))
-            loss.backward()
-            with torch.no_grad():
-                self.gaussians.max_radii2D[visibility_filter] = torch.max(
-                    self.gaussians.max_radii2D[visibility_filter],
-                    radii[visibility_filter],
-                )
-                self.gaussians.optimizer.step()
-                self.gaussians.optimizer.zero_grad(set_to_none=True)
-                self.gaussians.update_learning_rate(iteration)
-        Log("Map refinement done")
-
+  
     def push_to_frontend(self, tag=None):
         self.last_sent = 0
         keyframes = []
@@ -448,6 +415,7 @@ class BackEnd(mp.Process):
                     frames_to_optimize = self.config["Training"]["pose_window"]
                     iter_per_kf = self.mapping_itr_num if self.single_thread else 10
                     if not self.initialized:
+                        
                         if (
                             len(self.current_window)
                             == self.config["Training"]["window_size"]

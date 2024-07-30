@@ -1,5 +1,6 @@
 import torch
-
+from gaussian_splatting.utils.loss_utils import l1_loss, ssim, l1_loss_log_pow, l2_loss_log 
+import time
 
 def image_gradient(image):
     # Compute image gradient using Scharr Filter
@@ -141,6 +142,7 @@ def get_median_depth(depth, opacity=None, mask=None, return_std=False):
         return valid_depth.median(), valid_depth.std(), valid
     return valid_depth.median()
 
+
 def get_median_depth_wo_opacity(depth, mask=None, return_std=False):
     depth = depth.detach().clone()    
     valid = depth > 0    
@@ -150,3 +152,32 @@ def get_median_depth_wo_opacity(depth, mask=None, return_std=False):
     if return_std:
         return valid_depth.median(), valid_depth.std(), valid
     return valid_depth.median()
+
+# def depth_reg(depth, gt_image, huber_eps=0.1, mask=None):
+#     mask_v, mask_h = image_gradient_mask(depth)
+#     gray_grad_v, gray_grad_h = image_gradient(gt_image.mean(dim=0, keepdim=True))
+#     depth_grad_v, depth_grad_h = image_gradient(depth)
+#     gray_grad_v, gray_grad_h = gray_grad_v[mask_v], gray_grad_h[mask_h]
+#     depth_grad_v, depth_grad_h = depth_grad_v[mask_v], depth_grad_h[mask_h]
+
+#     return (torch.abs(gray_grad_v - depth_grad_v)+ torch.abs(gray_grad_h-depth_grad_h)).mean()
+
+
+# def get_loss_mapping_rgbd(config, image, depth, viewpoint, initialization=False):
+#     alpha = config["Training"]["alpha"] if "alpha" in config["Training"] else 0.95
+#     rgb_boundary_threshold = config["Training"]["rgb_boundary_threshold"]
+
+#     gt_image = viewpoint.original_image.cuda()
+
+#     gt_depth = torch.from_numpy(viewpoint.depth).to(
+#         dtype=torch.float32, device=image.device
+#     )[None]
+#     rgb_pixel_mask = (gt_image.sum(dim=0) > rgb_boundary_threshold).view(*depth.shape)
+#     depth_pixel_mask = (gt_depth > 0.01).view(*depth.shape)
+#     l1_depth = torch.abs(depth * depth_pixel_mask - gt_depth * depth_pixel_mask)    
+#     l1_rgb = torch.abs(image * rgb_pixel_mask - gt_image * rgb_pixel_mask)
+#     return alpha * l1_rgb.mean() + (1 - alpha) * l1_depth.mean()
+#     # l1_rgb= l1_rgb.mean()*0.8 + 0.2*(1 -ssim(image,gt_image))    
+#     # return alpha * l1_rgb + (1 - alpha) * l1_depth.mean()
+    
+    

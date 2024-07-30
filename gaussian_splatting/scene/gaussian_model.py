@@ -74,31 +74,36 @@ class GaussianModel:
         return symm
 
     def reset(self) :
-        self._xyz.to("cpu")
-        torch.cuda.empty_cache()
-        gc.collect()
-        self._features_dc.to("cpu")
-        torch.cuda.empty_cache()
-        gc.collect()
-        self._features_rest.to("cpu")
-        torch.cuda.empty_cache()
-        gc.collect()
-        self._scaling.to("cpu")
-        torch.cuda.empty_cache()
-        gc.collect()
-        self._rotation.to("cpu")
-        torch.cuda.empty_cache()
-        gc.collect()
-        self._opacity.to("cpu")
-        torch.cuda.empty_cache()
-        gc.collect()
-        self.max_radii2D.to("cpu")
-        torch.cuda.empty_cache()
-        gc.collect()
-        self.xyz_gradient_accum.to("cpu")
-        torch.cuda.empty_cache()
-        gc.collect()
+        tmp_xyz  = self._xyz.detach().to("cpu")
+        tmp_features_dc = self._features_dc.to("cpu")
+        tmp_features_rest = self._features_rest.to("cpu")
+        tmp_scaling = self._scaling.to("cpu")
+        tmp_rotation = self._rotation.to("cpu")
+        tmp_opacity = self._opacity.to("cpu")
+        tmp_max_radii2D = self.max_radii2D.to("cpu")
+        tmp_xyz_gradient_accum = self.xyz_gradient_accum.to("cpu")
         
+        del self._xyz
+        del self._features_dc
+        del self._features_rest
+        del self._scaling
+        del self._rotation
+        del self._opacity
+        del self.max_radii2D
+        del self.xyz_gradient_accum
+        
+        self._xyz = tmp_xyz
+        self._features_dc = tmp_features_dc
+        self._features_rest = tmp_features_rest
+        self._scaling = tmp_scaling
+        self._rotation = tmp_rotation
+        self._opacity = tmp_opacity
+        self.max_radii2D = tmp_max_radii2D
+        self.xyz_gradient_accum = tmp_xyz_gradient_accum
+        torch.cuda.empty_cache()
+        gc.collect()
+    
+           
     @property
     def get_scaling(self):
         return self.scaling_activation(self._scaling)

@@ -9,13 +9,13 @@ from tqdm import tqdm
 from gaussian_splatting.gaussian_renderer import render
 from gaussian_splatting.utils.graphics_utils import getProjectionMatrix2, getWorld2View2
 from gui import gui_utils
-from gaussian_splatting.utils.loss_utils import l1_loss, ssim
+from gaussian_splatting.utils.loss_utils import l1_loss, ssim, l1_loss_log_pow, l2_loss_log 
 from utils.camera_utils import Camera
-from utils.eval_utils import eval_ate, save_gaussians, eval_rendering
+from utils.eval_utils import eval_ate, save_gaussians, eval_rendering_ ,eval_ate_
 from utils.logging_utils import Log
 from utils.multiprocessing_utils import clone_obj
 from utils.pose_utils import update_pose
-from utils.slam_utils import get_loss_tracking, get_median_depth , get_median_depth_wo_opacity
+from utils.slam_utils import get_loss_tracking, get_median_depth , get_median_depth_wo_opacity ,depth_reg   
 from utils.submap_utils import Submap
 
 
@@ -24,11 +24,12 @@ class FrontEnd(mp.Process):
         super().__init__()
         self.config = config        
         self.pipeline_params = None
+        self.opt_params = None
         self.frontend_queue = None
         self.backend_queue = None
         self.q_main2vis = None
         self.q_vis2main = None
-
+        
         self.initialized = False
         self.kf_indices = []
         self.submap_list =[]
@@ -130,7 +131,7 @@ class FrontEnd(mp.Process):
         R_ = torch.eye(3)
         T_ = GT[3,:3]        
         viewpoint.update_RT(R_, T_)
-        print(self.cameras[cur_frame_idx].R)
+        # print(self.cameras[cur_frame_idx].R)
         # viewpoint.update_RT(viewpoint.R_gt, viewpoint.T_gt)
         depth_map = self.add_new_keyframe(cur_frame_idx, init=True)
         
@@ -150,7 +151,7 @@ class FrontEnd(mp.Process):
         R_ = torch.eye(3)
         T_ = GT[3,:3]        
         viewpoint.update_RT(R_, T_)
-        print(self.cameras[cur_frame_idx].R)
+        # print(self.cameras[cur_frame_idx].R)
         # viewpoint.update_RT(viewpoint.R_gt, viewpoint.T_gt)    
         depth_map = self.add_new_keyframe(cur_frame_idx, init=True)
         self.request_reset_submap(cur_frame_idx,viewpoint,depth_map)
@@ -162,13 +163,77 @@ class FrontEnd(mp.Process):
         # self.active_submap = None
     
     
+    def pose_refine(self ,refine_iter):
+        # print('track!')
+        # print("i = %i" %(cur_frame_idx - self.use_every_n_frames))
+        for idx in self.active_submap.kf_idx:
+            viewpoint = self.active_submap.viewpoints[idx]
+            viewpoint.reset_view_param()     
+            opt_params = []
+            opt_params.append(
+                {
+                    "params": [viewpoint.cam_rot_delta],
+                    "lr": self.config["Training"]["lr"]["cam_rot_delta"],
+                    "name": "rot_{}".format(viewpoint.uid),
+                }
+            )
+            opt_params.append(
+                {
+                    "params": [viewpoint.cam_trans_delta],
+                    "lr": self.config["Training"]["lr"]["cam_trans_delta"],
+                    "name": "trans_{}".format(viewpoint.uid),
+                }
+            )
+            opt_params.append(
+                {
+                    "params": [viewpoint.exposure_a],
+                    "lr": 0.01,
+                    "name": "exposure_a_{}".format(viewpoint.uid),
+                }
+            )
+            opt_params.append(
+                {
+                    "params": [viewpoint.exposure_b],
+                    "lr": 0.01,
+                    "name": "exposure_b_{}".format(viewpoint.uid),
+                }
+            )        
+            pose_optimizer = torch.optim.Adam(opt_params)
+            
+            for tracking_itr in range(refine_iter):  #self.tracking_itr_num):
+                
+                render_pkg = render(
+                    viewpoint, self.active_submap.gaussians, self.pipeline_params, self.active_submap.background
+                )
+                image, depth, opacity = (
+                    render_pkg["render"],
+                    render_pkg["depth"],
+                    render_pkg["opacity"],
+                )               
+                pose_optimizer.zero_grad()
+                loss_tracking = get_loss_tracking(
+                    self.config, image, depth, opacity, viewpoint
+                )            
+                loss_tracking.backward()
+
+                with torch.no_grad():
+                    pose_optimizer.step()
+                    converged = update_pose(viewpoint)
+        
+                if converged:       
+                    # print("[converge]trcaking_itr =  %i" %tracking_itr)   
+                    break          
+    
+        return 0 
+       
+    
     def tracking(self, cur_frame_idx, viewpoint):
         # print('track!')
         # print("i = %i" %(cur_frame_idx - self.use_every_n_frames))
         prev = self.cameras[cur_frame_idx - self.use_every_n_frames]
         viewpoint.update_RT(prev.R, prev.T)
    
-        opt_params = []
+        opt_params = []        
         opt_params.append(
             {
                 "params": [viewpoint.cam_rot_delta],
@@ -209,22 +274,57 @@ class FrontEnd(mp.Process):
                 render_pkg["depth"],
                 render_pkg["opacity"],
             )
-            # print("after len gaussian = %i" %len(self.active_submap.gaussians._xyz))
-            # print(" ")
             pose_optimizer.zero_grad()
-            loss_tracking = get_loss_tracking(
-                self.config, image, depth, opacity, viewpoint
-            )
-        
+            # print("after len gaussian = %i" %len(self.active_submap.gaussians._xyz))
+            # print(" ")         
+            
+            # gt_image = viewpoint.original_image.cuda()
+            # _, h, w = gt_image.shape
+            # mask_shape = (1, h, w)
+            # rgb_boundary_threshold = self.config["Training"]["rgb_boundary_threshold"]
+            # rgb_pixel_mask = (gt_image.sum(dim=0) > rgb_boundary_threshold).view(*mask_shape)
+            # rgb_pixel_mask = rgb_pixel_mask * viewpoint.grad_mask
+            # loss_i = (opacity * torch.abs(image * rgb_pixel_mask - gt_image * rgb_pixel_mask)).mean()
+            # # loss_i = (1.0 - self.opt_params.lambda_dssim) * Ll1 + self.opt_params.lambda_dssim * (1.0 - ssim(image, gt_image))          
+         
+            # log_ = True
+            # loss_d = 0
+            # # log_ = False        
+            # gt_depth = torch.Tensor(viewpoint.depth).unsqueeze(0).cuda()
+            # depth_pixel_mask = (gt_depth > 0.01).view(*depth.shape)
+            # opacity_mask = (opacity > 0.95).view(*depth.shape)  
+            # depth_mask = depth_pixel_mask * opacity_mask
+            # depth = depth*depth_mask
+            # gt_depth = gt_depth*depth_mask   
+            # if log_ :
+            #     gt_depth[torch.where(gt_depth<=1)] =1
+            #     depth[torch.where(depth<=1)] =1             
+            #     d1 = l1_loss_log_pow(depth,gt_depth)        
+            #     d2 = l2_loss_log(depth, gt_depth)               
+            #     loss_d = torch.sqrt(d2-0.85*d1)     
+                
+            #     # depth = torch.log(depth)
+            #     # gt_depth = torch.log(gt_depth)          
+            #     # dr = depth_reg(depth,gt_depth)           
+            #     # ss = (1.0 - ssim(depth, gt_depth))      
+            #     # loss_d =  0.6*d1 + 0.2* dr+ss           
+            # else :
+            #     d1 = l1_loss(depth,gt_depth) 
+            #     loss_d =  0.6*d1 + 0.2* depth_reg(depth,gt_depth)+(1.0 - ssim(depth, gt_depth))
+            # loss_tracking =loss_i*0.9+0.1*loss_d
+            #------------------------------------------------------
+            loss_tracking = get_loss_tracking( self.config, image, depth, opacity, viewpoint )                
+            
             loss_tracking.backward()
 
             with torch.no_grad():
                 pose_optimizer.step()
+                
                 converged = update_pose(viewpoint)
        
             if converged:       
                 # print("[converge]trcaking_itr =  %i" %tracking_itr)   
-                break          
+                break    
         
         # print("[finish]trcaking_itr =  %i" %tracking_itr)   
         self.median_depth = get_median_depth(depth, opacity)
@@ -238,11 +338,11 @@ class FrontEnd(mp.Process):
         cur_frame_visibility_filter,
         occ_aware_visibility,
     ):  
-        # if cur_frame_idx % 8 == 0 :#  or  cur_frame_idx == 716 or cur_frame_idx == 717:
-        #     print("key fraaaaame~!")
-        #     return True
-        # else :
-        #     return False
+    #     if cur_frame_idx % 8 == 0 :#  or  cur_frame_idx == 716 or cur_frame_idx == 717:
+    #         print("key fraaaaame~!")
+    #         return True
+    #     else :
+    #         return False
         kf_translation = self.config["Training"]["kf_translation"]
         kf_min_translation = self.config["Training"]["kf_min_translation"]
         kf_overlap = self.config["Training"]["kf_overlap"]
@@ -267,14 +367,15 @@ class FrontEnd(mp.Process):
         return (point_ratio_2 < kf_overlap and dist_check2) or dist_check
     
     def is_new_submap(
-        self
+        self,
+        cur_frame_idx
     ):  
                       
         # if(cur_frame_idx == 720 or cur_frame_idx == 1048 or cur_frame_idx == 1496):
         #     return True  
         
         # if(cur_frame_idx % 352 ==0 ):
-            # return True      
+        #     return True      
         if (self.active_submap.get_submap_size()>=self.max_kf_size):
             print("active map size exceed max kf size %i , create new sub map!"%self.active_submap.get_submap_size())
             return True    
@@ -362,10 +463,19 @@ class FrontEnd(mp.Process):
         # print("f  : tag = keyframe")
         self.requested_keyframe += 1
 
+    def check_mem(self,tag):
+        print( tag+ f" Reserved Memory : {torch.cuda.memory_reserved()/1024.0/1024.0:.2f}MB" )
+        print( tag+ f" Allocated Memory : {torch.cuda.memory_allocated()/1024.0/1024.0:.2f}MB")
+
     def request_new_submap(self, cur_frame_idx, viewpoint,depth_map):
+        
+        self.last_kf = self.active_submap.current_window[0]   
+      
+        self.check_mem("before")
+        self.submap_to_cpu(self.active_submap)    
+        self.check_mem("after")
        
-        self.last_kf = self.active_submap.get_last_frame_idx()     
-        self.submap_list.append(self.active_submap)
+        self.submap_list.append(self.active_submap)  
      
         msg = ["new_map", cur_frame_idx,viewpoint,depth_map]
         # msg = ["new_map", cur_frame_idx,viewpoint,last_kf,depth_map]
@@ -383,26 +493,31 @@ class FrontEnd(mp.Process):
         self.requested_new_submap = True  
 
     def request_init(self, cur_frame_idx, viewpoint, depth_map):
+        
         msg = ["init", cur_frame_idx, viewpoint, depth_map]
         self.backend_queue.put(msg)
+        
         # print("f  : tag = init")
         self.requested_init = True
 
     def sync_backend(self, data):
-   
+        
         if data[0] == "init" or data[0] =="new_map" or data[0] =="reset":
+            
             self.active_submap = data[1]              
-            self.last_kf = self.active_submap.current_window[-1] 
+            self.last_kf = self.active_submap.current_window[0]
+            
             for kf_id in self.active_submap.current_window:
                 kf = self.active_submap.viewpoints[kf_id]           
-                self.cameras[kf_id].update_RT(kf.R.clone(), kf.T.clone())      
+                self.cameras[kf_id].update_RT(kf.R.clone(), kf.T.clone())                
+            
             
         else :
-
+            
             self.active_submap.gaussians = data[1]    
             self.active_submap.occ_aware_visibility  = data[2]           
             keyframes = data[3]
-            self.last_kf = self.active_submap.current_window[-1]       
+            self.last_kf = self.active_submap.current_window[0]       
         
             for kf_id, kf_R, kf_T in keyframes:
                 self.active_submap.viewpoints[kf_id].update_RT(kf_R.clone(), kf_T.clone())         
@@ -419,8 +534,44 @@ class FrontEnd(mp.Process):
 
     def cleanup(self, cur_frame_idx): # R,T는 놔두고 나머지만 지움
         self.cameras[cur_frame_idx].clean()        
-        if cur_frame_idx % 10 == 0:
+        torch.cuda.empty_cache()
+
+    def submap_to_cpu(self, submap):
+        for keys,views in submap.viewpoints.items():
+            self.cameras[keys].viewpoints_to_cpu()
+            views.viewpoints_to_cpu()
+        
+        for idx in submap.current_window :
+            submap.occ_aware_visibility[idx] = None        
             torch.cuda.empty_cache()
+        submap.gaussians.reset()                
+
+    def eval_(self, tag_):
+        eval_ate_(                        
+            self.active_submap,
+            tag_,
+            self.save_dir,
+            monocular=self.monocular,
+        )  
+        # eval_rendering_(
+        #     self.cameras,
+        #     self.active_submap.gaussians,
+        #     self.dataset,        
+        #     self.pipeline_params,
+        #     self.active_submap.background,
+        #     kf_indices=self.active_submap.kf_idx,
+        #     tag_=tag_,
+        # )
+        # eval_ate(
+        #     self.submap_list,
+        #     self.active_submap,
+        #     self.save_dir,
+        #     self.active_submap.kf_idx[-1],
+        #     final=False,
+        #     monocular=self.monocular,
+        #     new_submap = True,
+        #     tag=tag_
+        # )  
 
     def run(self):
         cur_frame_idx = 0
@@ -472,13 +623,14 @@ class FrontEnd(mp.Process):
                 if not self.initialized and self.requested_keyframe > 0:
                     time.sleep(0.01)
                     continue
-             
-                # 최초 카메라 지정    
+                    
+                # 최초 카메라 지정   
+                
                 viewpoint = Camera.init_from_dataset(
                     self.dataset, cur_frame_idx, projection_matrix
-                )                
-                viewpoint.compute_grad_mask(self.config)
-                self.cameras[cur_frame_idx] = viewpoint               
+                )                            
+                viewpoint.compute_grad_mask(self.config)               
+                self.cameras[cur_frame_idx] = viewpoint     
               
                 #시작할때, 혹은 reset이 필요할때 -> initialize 다시함
                 if self.reset:
@@ -486,15 +638,17 @@ class FrontEnd(mp.Process):
                     self.initialize(cur_frame_idx, viewpoint)
                     # self.current_window.append(cur_frame_idx)
                     cur_frame_idx += 1
+                    
                     continue
                 print("cur_frame_id = %i"%cur_frame_idx)        
                 self.initialized = self.initialized or (
                     len(self.active_submap.current_window) == self.window_size
                 )
                 #tr1 = time.time()    
+                self.check_mem("before")
                 render_pkg = self.tracking(cur_frame_idx, viewpoint)
                 #tr2 = time.time()
-               
+                self.check_mem("after")
                 if self.requested_keyframe > 0:
                     self.cleanup(cur_frame_idx)
                     cur_frame_idx += 1
@@ -507,16 +661,20 @@ class FrontEnd(mp.Process):
                 # print("check = %i" %(cur_frame_idx - last_keyframe_idx))
                 check_time = (cur_frame_idx - last_keyframe_idx) >= self.kf_interval
                 # print(cur_frame_idx - last_keyframe_idx)
+         
                 curr_visibility = (render_pkg["n_touched"] > 0).long()
+            
                 # print(curr_visibility.shape)
                 # print(self.occ_aware_visibility[last_keyframe_idx].shape)
                 # print("is cur_frame keyframe?")
+            
                 create_kf = self.is_keyframe(
                     cur_frame_idx,
                     last_keyframe_idx,
                     curr_visibility,
                     self.active_submap.occ_aware_visibility,
                 )
+              
                 # print("kf test = %r"%create_kf)
                 # print("cur vis = %i, last kf = %i " %(curr_visibility.count_nonzero(),self.occ_aware_visibility[last_keyframe_idx].count_nonzero()))
                 if len(self.active_submap.current_window) < self.window_size:
@@ -531,10 +689,9 @@ class FrontEnd(mp.Process):
                     point_ratio = intersection / union
                     print("point_ratio = %f , check_time= %i" %(point_ratio,check_time))
                     create_kf = (
-                        check_time
-                        and point_ratio < self.config["Training"]["kf_overlap"]
+                        check_time # and point_ratio < self.config["Training"]["kf_overlap"]
                     )
-                
+       
                 # print("kf test2 = %r"%create_kf)
                 # if self.single_thread:
                 #     create_kf = check_time and create_kf
@@ -542,16 +699,27 @@ class FrontEnd(mp.Process):
                     #print("cur frame is keyframe")
                     #self.kf_indices.append(cur_frame_idx)
                     # d1 = time.time()
-                    
+                    # print("%r" %(self.active_submap.gaussians.optimizer is None))
                     # d2= time.time()
                     # print("depth map time = "+str(d2-d1))
-                    create_new_submap = self.is_new_submap()
+                    create_new_submap = self.is_new_submap(cur_frame_idx)         
                     #cur_frame_idx, last_keyframe_idx, curr_visibility,
                     #self.occ_aware_visibility,viewpoint,depth_map)
                     if(create_new_submap):
-                        # depth_map = self.add_new_keyframe(cur_frame_idx, viewpoint,depth=render_pkg["depth"], init=False)
+                        
+                        # print("-"*60)
+                        # self.eval_("before")
+                        
+                        
+                        # # depth_map = self.add_new_keyframe(cur_frame_idx, viewpoint,depth=render_pkg["depth"], init=False)
+                        depth_map = self.add_new_keyframe(
+                            cur_frame_idx,                                                    
+                            depth=render_pkg["depth"],
+                            opacity=render_pkg["opacity"],
+                            init=False,
+                        )    
                         d1= time.time()
-                        depth_map = self.add_new_keyframe(cur_frame_idx, init=True)
+                        # depth_map = self.add_new_keyframe(cur_frame_idx, init=True)
                         d2= time.time()
                         self.request_new_submap(cur_frame_idx,viewpoint,depth_map)
                         print("[new map] depth map time = "+str(d2-d1))
@@ -587,30 +755,8 @@ class FrontEnd(mp.Process):
                             depth=render_pkg["depth"],
                             opacity=render_pkg["opacity"],
                             init=False,
-                        )       
-                        
-                        # print(viewpoint.R)
-                        # print(viewpoint.T)
-                        # print(self.cameras[cur_frame_idx].R)
-                        # print(self.cameras[cur_frame_idx].T)    
-                        # print(self.active_submap.viewpoints[cur_frame_idx].R)
-                        # print(self.active_submap.viewpoints[cur_frame_idx].T)  
-                        
-                        # GT = torch.eye(4)
-                        # R_ = torch.tensor([[ 9.9328e-01,  9.2815e-02, -6.9155e-02],
-                        # [-9.2618e-02,  9.9568e-01,  6.0690e-03],
-                        # [ 6.9420e-02,  3.7645e-04,  9.9759e-01]], device='cuda:0')      
-                        # T_ = torch. tensor([-0.0277, -0.0058,  0.0996], device='cuda:0')
-                        # self.cameras[cur_frame_idx].update_RT(R_,T_)
-                        # self.active_submap.viewpoints[cur_frame_idx].update_RT(R_,T_)
-                        # viewpoint.update_RT(R_, T_)                     
-                        # print(viewpoint.R)
-                        # print(viewpoint.T)
-                        # print(self.cameras[cur_frame_idx].R)
-                        # print(self.cameras[cur_frame_idx].T)    
-                        # print(self.active_submap.viewpoints[cur_frame_idx].R)
-                        # print(self.active_submap.viewpoints[cur_frame_idx].T)  
-                        
+                        )                           
+                                    
                         self.request_keyframe(
                             cur_frame_idx, viewpoint, self.active_submap.current_window, depth_map, self.active_submap.kf_idx)
                     
@@ -626,13 +772,15 @@ class FrontEnd(mp.Process):
                 
                 if (
                     self.save_results
-                    and len(self.kf_indices) >=4 
+                    and len(self.active_submap.kf_idx) >=4 
+                    and not create_new_submap
                     and self.save_trj
                     and create_kf
                     and len(self.kf_indices) % self.save_trj_kf_intv == 0
                     ):
                     Log("Evaluating ATE at frame: ", cur_frame_idx)
                     # print("len of kf indices = %i "%len(self.kf_indices))
+                    # self.eval_("before")
                     eval_ate(                        
                         self.submap_list,
                         self.active_submap,
@@ -650,40 +798,46 @@ class FrontEnd(mp.Process):
                     time.sleep(max(0.01, 1.0 / 3.0 - duration / 1000))
             else:
                 print("b num of queue = %i " %self.frontend_queue.qsize())
-                # data = None
-                # if (self.frontend_queue.qsize() ==1):
-                #     data = self.frontend_queue.get()    
-                # while self.frontend_queue.qsize() >=1 :
-                #     data = self.frontend_queue.get()
-                #     if data[0]=="sync_backend":
-                #         continue
-                #     else :
-                #         break                
-                # print("a num of queue = %i, tag = %s " %(self.frontend_queue.qsize(),data[0]))
+                data = None
+                if (self.frontend_queue.qsize() ==1):
+                    data = self.frontend_queue.get()    
+                while self.frontend_queue.qsize() >=1 :
+                    data = self.frontend_queue.get()
+                    if data[0]=="sync_backend":
+                        continue
+                    else :
+                        break                
+                print("a num of queue = %i, tag = %s " %(self.frontend_queue.qsize(),data[0]))
                 
-                data = self.frontend_queue.get()
+                # data = self.frontend_queue.get()
                 if data[0] == "sync_backend":
-                    #print("bf : tag = sync_backend")
+                    print("bf : tag = sync_backend")
                     self.sync_backend(data)
 
                 elif data[0] == "keyframe":
-                    #print("bf  : tag = keyframe")
+                    print("bf  : tag = keyframe")
                     self.sync_backend(data)
                     self.requested_keyframe -= 1
 
                 elif data[0] == "init":
-                    #print("bf : tag = init")
+                    print("bf : tag = init")
                     self.sync_backend(data)
                     self.requested_init = False
                     
                 elif data[0] == "new_map":
-                    #print("bf : tag = new_map")
+                    print("bf : tag = new_map")
                     self.sync_backend(data)
                     self.requested_new_submap = False 
-                    self.initialized = not self.monocular       
+                    self.initialized = not self.monocular      
+                
+                elif data[0] == "refine":
+                    print("bf : tag = refine")
+                    self.sync_backend(data)                  
+                    self.eval_("after")
+                    print("-"*60)
                     
                 elif data[0] == "reset":
-                    #print("bf : tag = new_map")
+                    print("bf : tag = reset")
                     self.sync_backend(data)
                     self.requested_new_submap = False 
                     self.initialized = not self.monocular  
@@ -692,8 +846,8 @@ class FrontEnd(mp.Process):
                     Log("Frontend Stopped.")
                     break
                 
-                # while not self.frontend_queue.empty():
-                #     self.frontend_queue.get()
+                while not self.frontend_queue.empty():
+                    self.frontend_queue.get()
                 
                 
                 

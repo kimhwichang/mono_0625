@@ -40,19 +40,13 @@ class Submap(nn.Module):
         # self.device = "cuda"
         # self.dtype = torch.float32
     
-    def reset(self):
-        
-        for i,v in self.viewpoints.items():
-            v.clean2()
+    def submap_to_cpu(self, submap):
+        for keys,views in submap.viewpoints.items():
+            views.viewpoints_to_cpu()
+            self.occ_aware_visibility[keys] = None
             
-        
-        for i,vis in self.occ_aware_visibility.items():
-            vis.to("cpu")
             torch.cuda.empty_cache()
-            gc.collect()
-        
-        self.gaussians.reset()
-        self.gaussians = None
+        self.gaussians.reset()             
 
     def set_hyperparams(self):
         self.save_results = self.config["Results"]["save_results"]
@@ -183,7 +177,6 @@ class Submap(nn.Module):
             self.current_window.append(cur_view.uid)            
             self.pose_list.append(self.T_CW)
             # self.pose_list.append(cur_view.T_W)     
-    
     def gen_pose_matrix(self,R, T):
         pose = torch.eye(4)
         pose[0:3, 0:3] = R.to("cpu")
@@ -213,6 +206,9 @@ class Submap(nn.Module):
         return self.kf_idx
     
     def get_anchor_frame(self) :
+        return self.anchor_frame
+    
+    def get_anchor_frame_idx(self) :
         return self.anchor_frame
     
     def get_anchor_frame_pose(self) :

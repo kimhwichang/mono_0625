@@ -6,11 +6,11 @@ import torch.multiprocessing as mp
 from tqdm import tqdm
 from gaussian_splatting.utils.graphics_utils import getProjectionMatrix2, getWorld2View2
 from gaussian_splatting.gaussian_renderer import render
-from gaussian_splatting.utils.loss_utils import l1_loss, ssim
+from gaussian_splatting.utils.loss_utils import l1_loss, ssim , l2_loss , l1_loss_log_pow , l2_loss_log
 from utils.logging_utils import Log
 from utils.multiprocessing_utils import clone_obj
 from utils.pose_utils import update_pose
-from utils.slam_utils import get_loss_mapping
+from utils.slam_utils import get_loss_mapping, get_loss_tracking , depth_reg
 from utils.submap_utils import Submap
 
 class BackEnd(mp.Process):
@@ -50,7 +50,7 @@ class BackEnd(mp.Process):
         self.active_submap.kf_idx.append(cur_idx)
         self.active_submap.current_window = []
         self.active_submap.current_window.append(cur_idx)  
-        self.active_submap.occ_aware_visibility={}
+        self.active_submap.occ_aware_visibility={}   
         
     def reset(self):
    
@@ -58,27 +58,59 @@ class BackEnd(mp.Process):
 
         # remove all gaussians
         self.active_submap.reset()
-        self.active_submap = None
-        # remove everything from the queues
-        # while not self.backend_queue.empty():
-        #     self.backend_queue.get()
-        # while not self.frontend_queue.empty():
-        #     self.frontend_queue.get()
-        # self.backend_queue = None
-        # self.backend_queue = mp.Queue()
-        # self.frontend_queue = None
-        # self.frontend_queue = mp.Queue()
+        self.active_submap = None   
+   
+    def color_refinement(self , iteration_total):
+        Log("Starting color refinement")
+
+        print(self.active_submap.gaussians._xyz[0])
+        for iteration in tqdm(range(1, iteration_total + 1)):
+            viewpoint_idx_stack = list(self.active_submap.viewpoints.keys())
+            viewpoint_cam_idx = viewpoint_idx_stack.pop(
+                random.randint(0, len(viewpoint_idx_stack) - 1)
+            )
+            # print(viewpoint_cam_idx)
+            
+            viewpoint_cam = self.active_submap.viewpoints[viewpoint_cam_idx]
+            render_pkg = render(
+                viewpoint_cam, self.active_submap.gaussians, self.pipeline_params, self.active_submap.background
+            )
+            image, visibility_filter, radii = (
+                render_pkg["render"],
+                render_pkg["visibility_filter"],
+                render_pkg["radii"],
+            )
+
+            gt_image = viewpoint_cam.original_image.cuda()
+            Ll1 = l1_loss(image, gt_image)
+            loss = (1.0 - self.opt_params.lambda_dssim) * (
+                Ll1
+            ) + self.opt_params.lambda_dssim * (1.0 - ssim(image, gt_image))
+            loss.backward()
+            with torch.no_grad():
+                self.active_submap.gaussians.max_radii2D[visibility_filter] = torch.max(
+                    self.active_submap.gaussians.max_radii2D[visibility_filter],
+                    radii[visibility_filter],
+                )
+                self.active_submap.gaussians.optimizer.step()
+                self.active_submap.gaussians.optimizer.zero_grad(set_to_none=True)
+                self.active_submap.gaussians.update_learning_rate(iteration)
+        Log("Map refinement done")
+        print(self.active_submap.gaussians._xyz[0]) 
+    
 
     def initialize_sub_map(self, viewpoint, first_ = True): # ,last_kf = None):
         if (first_):    
-                
+           
             self.active_submap = Submap(self.config,self.device,self.submap_id,first_)
             self.active_submap.initialize_(viewpoint)
             # self.global_pose_list.append(self.active_submap.get_anchor_frame_pose())
             # self.submap_list.append(self.active_submap)
             
         else :
+                    
             last_pose = self.active_submap.get_anchor_frame_pose() 
+            self.submap_to_cpu(self.active_submap)
             # r1 = time.time()
             # # self.reset()
             # r2= time.time()
@@ -100,7 +132,7 @@ class BackEnd(mp.Process):
                 viewspace_point_tensor,
                 visibility_filter,
                 radii,
-                depth,
+                depth,  
                 opacity,
                 n_touched,
             ) = (
@@ -148,7 +180,269 @@ class BackEnd(mp.Process):
             # to do - 이전 gaussian 추종 
         self.submap_id+=1
         return render_pkg
+    
+    def set_pose_optimizer(self,selected_idx) :
+        opt_params = []
+        for id in range(len(selected_idx)):
+            viewpoint = self.active_submap.viewpoints[self.active_submap.kf_idx[selected_idx[id]]]
+            if id>=( len(selected_idx)-3 ) :
+                opt_params.append(
+                {
+                    "params": [viewpoint.cam_rot_delta],
+                    "lr": self.config["Training"]["lr"]["cam_rot_delta"]
+                    * 0.5,
+                    "name": "rot_{}".format(viewpoint.uid),
+                }
+                )
+                opt_params.append(
+                    {
+                        "params": [viewpoint.cam_trans_delta],
+                        "lr": self.config["Training"]["lr"][
+                            "cam_trans_delta"
+                        ]
+                        * 0.5,
+                        "name": "trans_{}".format(viewpoint.uid),
+                    }
+                )
+            opt_params.append(
+                {
+                    "params": [viewpoint.exposure_a],
+                    "lr": 0.01,
+                    "name": "exposure_a_{}".format(viewpoint.uid),
+                }
+            )
+            opt_params.append(
+                {
+                    "params": [viewpoint.exposure_b],
+                    "lr": 0.01,
+                    "name": "exposure_b_{}".format(viewpoint.uid),
+                }
+            )
+        pose_optimizers = torch.optim.Adam(opt_params)
+        return pose_optimizers
+    
+    def pose_refine(self, iters=500, frames_to_optimize_ = 10):
+        # print("map! last_sent =%i "%self.last_sent )
+      
+        viewpoint_stack = [self.active_submap.viewpoints[kf_id] for kf_id in self.active_submap.kf_idx]  
+        kf_num  = len(viewpoint_stack) 
+        for s in range(kf_num//frames_to_optimize_ +1):
+            if(s == kf_num//frames_to_optimize_):
+                if kf_num%frames_to_optimize_==0 :
+                    continue
+                else :
+                    selected_idx = torch.arange(s*frames_to_optimize_, kf_num)                       
+            else :
+                selected_idx = torch.arange(s*frames_to_optimize_,(s+1)*frames_to_optimize_)       
+            random_idx = []
+            for idx in range(kf_num):
+                if idx in selected_idx:
+                    continue
+                random_idx.append(idx)
+            optimizer_ = self.set_pose_optimizer(selected_idx)  
+            for _ in range(iters):          
+                loss_mapping = 0             
+                t1=time.time()         
+                
+                for cam_idx in selected_idx:
+                    viewpoint = viewpoint_stack[cam_idx]                  
+                    render_pkg = render( viewpoint, self.active_submap.gaussians, self.pipeline_params, self.active_submap.background )
+                    (
+                        image,               
+                        depth,
+                        opacity
+                    
+                    ) = (
+                        render_pkg["render"],                
+                        render_pkg["depth"],
+                        render_pkg["opacity"]              
+                    )          
+                    loss_mapping += get_loss_mapping(
+                        self.config, image, depth, viewpoint, opacity
+                    )   
+                    
+                for cam_idx in torch.randperm(len(random_idx))[:2]:
+                    viewpoint = viewpoint_stack[random_idx[cam_idx]]                  
+                    render_pkg = render( viewpoint, self.active_submap.gaussians, self.pipeline_params, self.active_submap.background )
+                    (
+                        image,               
+                        depth,
+                        opacity
+                    
+                    ) = (
+                        render_pkg["render"],                
+                        render_pkg["depth"],
+                        render_pkg["opacity"]              
+                    )          
+                    loss_mapping += get_loss_mapping(
+                        self.config, image, depth, viewpoint, opacity
+                    )   
+                t2=time.time()        
+                scaling = self.active_submap.gaussians.get_scaling
+                isotropic_loss = torch.abs(scaling - scaling.mean(dim=1).view(-1, 1))
+                loss_mapping += 10 * isotropic_loss.mean()
+                loss_mapping.backward()           
+                with torch.no_grad():
+                    optimizer_.step()
+                    optimizer_.zero_grad(set_to_none=True)
+                    t14= time.time()
+                    # Pose update
+                    for idx  in selected_idx[-3:] :                 
+                        update_pose(viewpoint_stack[idx])        
+        return 0
+    
+    def pose_refine_track(self ,refine_iter):
+       
+        for idx in self.active_submap.kf_idx:
+            viewpoint = self.active_submap.viewpoints[idx]
+            opt_params = []
+            opt_params.append(
+                {
+                    "params": [viewpoint.cam_rot_delta],
+                    "lr": self.config["Training"]["lr"]["cam_rot_delta"],
+                    "name": "rot_{}".format(viewpoint.uid),
+                }
+            )
+            opt_params.append(
+                {
+                    "params": [viewpoint.cam_trans_delta],
+                    "lr": self.config["Training"]["lr"]["cam_trans_delta"],
+                    "name": "trans_{}".format(viewpoint.uid),
+                }
+            )
+            opt_params.append(
+                {
+                    "params": [viewpoint.exposure_a],
+                    "lr": 0.01,
+                    "name": "exposure_a_{}".format(viewpoint.uid),
+                }
+            )
+            opt_params.append(
+                {
+                    "params": [viewpoint.exposure_b],
+                    "lr": 0.01,
+                    "name": "exposure_b_{}".format(viewpoint.uid),
+                }
+            )        
+            pose_optimizer = torch.optim.Adam(opt_params)
+            # print("-"*50)
+            for tracking_itr in range(refine_iter):  #self.tracking_itr_num):
+                
+                render_pkg = render(
+                    viewpoint, self.active_submap.gaussians, self.pipeline_params, self.active_submap.background
+                )
+                image, depth, opacity = (
+                    render_pkg["render"],
+                    render_pkg["depth"],
+                    render_pkg["opacity"],
+                )               
+                
+                # gt_image = viewpoint.original_image.cuda()
+                # # print(gt_image.shape)
+                # Ll1 = l1_loss(image, gt_image)
+                # loss1 = (1.0 - self.opt_params.lambda_dssim) * (
+                #     Ll1
+                # ) + self.opt_params.lambda_dssim * (1.0 - ssim(image, gt_image))
+                # loss.backward()
+                
+                # loss_t = get_loss_tracking(self.config, image, depth, opacity, viewpoint )
+                     
+                gt_depth = torch.Tensor(viewpoint.depth).unsqueeze(0).cuda()
+                gt_depth[torch.where(gt_depth<=1)] =1
+                depth[torch.where(depth<=1)] =1
+                d1 = l1_loss_log_pow(depth,gt_depth)
+                d2 = l2_loss_log(depth, gt_depth)
+                d_ = torch.sqrt(d2-0.85*d1)
+                # loss2 =  0.6*d_ + 0.2* depth_reg(depth,gt_depth)+(1.0 - ssim(depth, gt_depth))
+                # # loss2 = (1.0 - self.opt_params.lambda_dssim) * (
+                # #     Ll2
+                # # ) + self.opt_params.lambda_dssim * (1.0 - ssim(depth, gt_depth))
+                       
+                                
+                
         
+                loss = d_#loss1 #loss2+loss3
+                # print(loss)
+                loss.backward()
+                # loss_tracking = get_loss_mapping(#tracking(
+                #     self.config, image, depth, viewpoint,opacity
+                # )            
+                # loss_tracking.backward()
+
+                with torch.no_grad():
+                    pose_optimizer.step()
+                    pose_optimizer.zero_grad()
+                    converged = update_pose(viewpoint)
+        
+                if converged:       
+                    # print("[converge]trcaking_itr =  %i" %tracking_itr)   
+                    break          
+        
+        return 0
+    
+    def pose_refine_t(self ,refine_iter,viewpoint,use_prev = False):
+        if use_prev:
+            prev_kf = self.active_submap.get_last_frame()
+            viewpoint.update_RT(prev_kf.R.clone(),prev_kf.T.clone())
+       
+        opt_params = []
+        opt_params.append(
+            {
+                "params": [viewpoint.cam_rot_delta],
+                "lr": self.config["Training"]["lr"]["cam_rot_delta"],
+                "name": "rot_{}".format(viewpoint.uid),
+            }
+        )
+        opt_params.append(
+            {
+                "params": [viewpoint.cam_trans_delta],
+                "lr": self.config["Training"]["lr"]["cam_trans_delta"],
+                "name": "trans_{}".format(viewpoint.uid),
+            }
+        )
+        opt_params.append(
+            {
+                "params": [viewpoint.exposure_a],
+                "lr": 0.01,
+                "name": "exposure_a_{}".format(viewpoint.uid),
+            }
+        )
+        opt_params.append(
+            {
+                "params": [viewpoint.exposure_b],
+                "lr": 0.01,
+                "name": "exposure_b_{}".format(viewpoint.uid),
+            }
+        )        
+        pose_optimizer = torch.optim.Adam(opt_params)
+        
+        for tracking_itr in range(refine_iter):  #self.tracking_itr_num):
+            
+            render_pkg = render(
+                viewpoint, self.active_submap.gaussians, self.pipeline_params, self.active_submap.background
+            )
+            image, depth, opacity = (
+                render_pkg["render"],
+                render_pkg["depth"],
+                render_pkg["opacity"],
+            )               
+            pose_optimizer.zero_grad()
+            loss_tracking = get_loss_tracking(
+                self.config, image, depth, opacity, viewpoint
+            )            
+            loss_tracking.backward()
+
+            with torch.no_grad():
+                pose_optimizer.step()
+                converged = update_pose(viewpoint)
+    
+            if converged:       
+                # print("[converge]trcaking_itr =  %i" %tracking_itr)   
+                break          
+        
+        return 0
+         
+         
     def map(self, submap, prune=False, iters=1):
         # print("map! last_sent =%i "%self.last_sent )
         
@@ -203,13 +497,12 @@ class BackEnd(mp.Process):
                     render_pkg["depth"],
                     render_pkg["opacity"],
                     render_pkg["n_touched"],
-                )
-          
-                # print("rendering = "+str(st.elapsed_time(en)))
-                # print("map inner iter rendering!")
+                )      
+        
                 loss_mapping += get_loss_mapping(
                     self.config, image, depth, viewpoint, opacity
                 )
+               
                 # print("map inner iter get loss mapping!")  
                 viewspace_point_tensor_acm.append(viewspace_point_tensor)
                 visibility_filter_acm.append(visibility_filter)
@@ -241,9 +534,11 @@ class BackEnd(mp.Process):
                     render_pkg["opacity"],
                     render_pkg["n_touched"],
                 )
+                
                 loss_mapping += get_loss_mapping(
                     self.config, image, depth, viewpoint, opacity
                 )
+                
                 viewspace_point_tensor_acm.append(viewspace_point_tensor)
                 visibility_filter_acm.append(visibility_filter)
                 radii_acm.append(radii)
@@ -360,7 +655,7 @@ class BackEnd(mp.Process):
                 for cam_idx in range(min(frames_to_optimize, len(current_window))):
                     # cam_idx = -1*cam_idx -1
                     viewpoint = viewpoint_stack[cam_idx]
-                    if viewpoint.uid == 0:
+                    if viewpoint.uid == self.active_submap.kf_idx[0]:
                         continue
                     update_pose(viewpoint)
                 t15= time.time()
@@ -376,6 +671,18 @@ class BackEnd(mp.Process):
             total_view.append(kf)
         return total_view
 
+    def submap_to_cpu(self, submap):
+        for views in submap.viewpoints.values():
+            views.viewpoints_to_cpu()
+        
+        for idx in submap.current_window :
+            submap.occ_aware_visibility[idx] = None        
+            torch.cuda.empty_cache()
+        submap.gaussians.reset() 
+    
+    def check_mem(self,tag):
+        print( tag+ f" Reserved Memory : {torch.cuda.memory_reserved()/1024.0/1024.0:.2f}MB" )
+        print( tag+ f" Allocated Memory : {torch.cuda.memory_allocated()/1024.0/1024.0:.2f}MB")
     
     def push_to_frontend2(self, tag=None):
         self.last_sent = 0       
@@ -393,14 +700,17 @@ class BackEnd(mp.Process):
             kf = self.active_submap.viewpoints[kf_idx]
             keyframes.append((kf_idx, kf.R.clone(), kf.T.clone()))
       
-        # last_ = self.active_submap.current_window[-1]      
+        last_ = self.active_submap.current_window[0]      
         if(tag=="init" or tag=="new_map" or tag=="reset"):
             # print("bb : tag = "+tag)  
             msg = [tag, clone_obj(self.active_submap)]
+            self.frontend_queue.put(msg)
+
         else :
-            # print("[keyframe # %i] bb : tag = %s " %(last_ ,tag))  
+            # msg = [tag, self.active_submap.gaussians, self.active_submap.occ_aware_visibility,keyframes]
+            print("[keyframe # %i] bb : tag = %s " %(last_ ,tag))  
             msg = [tag, clone_obj(self.active_submap.gaussians), self.active_submap.occ_aware_visibility,keyframes]
-        self.frontend_queue.put(msg)
+            self.frontend_queue.put(msg)
 
     def run(self):
         while True:
@@ -421,7 +731,9 @@ class BackEnd(mp.Process):
                 #     continue               
      
                 # m1 = time.time()
+                self.check_mem("map_kf back")
                 self.map(self.active_submap)
+                self.check_mem("map1_kf back")
                 # m2 = time.time()
                 
                 # print("map time = "+str(m2-m1))
@@ -429,6 +741,7 @@ class BackEnd(mp.Process):
                 if self.last_sent >= 10:
                     # pm1 = time.time()
                     self.map(self.active_submap, prune=True, iters=10)
+                    self.check_mem("map2_kf back")
                     # print("map 1")
                     self.push_to_frontend()
                     # pm2 = time.time()
@@ -454,7 +767,41 @@ class BackEnd(mp.Process):
                     self.submap_init = False
                     # self.submap_list.append(self.active_submap)                    
                     n1 =time.time()
+                    # c1 = time.time()
+                    # self.color_refinement(15000)
+                    # c2 = time.time()
+                    # print("")
+                    # print("clor_refine time = "+str(c2-c1))
+                    # print("")    
+                    # t1 = time.time()
+                    # self.pose_refine(iters = 30,frames_to_optimize_=8)
+                    # t2 = time.time()
+                    # print("")
+                    # print("pose_refine time = "+str(t2-t1))
+                    # print("")
+                    
+                    # t1 = time.time()
+                    # self.pose_refine_track(150)
+                    # t2 = time.time()
+                    # print("")
+                    # print("pose_refine_track time = "+str(t2-t1))
+                    # print("")
+                                    
+                    # t1 = time.time()
+                    # self.pose_refine_t(150, viewpoint,False)
+                    # t2 = time.time()
+                    # print("")
+                    # print("pose_refine_t time = "+str(t2-t1))
+                    # print("")
+                    # self.push_to_frontend("refine")
+                    print("----")
+                    print(viewpoint.R)
+                    print(viewpoint.T)
                     self.initialize_sub_map(viewpoint,False)  
+                    
+                    print(viewpoint.R)
+                    print(viewpoint.T)
+                    print("////")
                     self.add_next_kf(
                         cur_frame_idx, viewpoint, depth_map=depth_map, init=True
                     )                                  
@@ -470,7 +817,7 @@ class BackEnd(mp.Process):
                     depth_map = data[3]
                     self.iteration_count = 0
                     self.last_sent = 0
-                    self.initialized = not self.monocular
+                    self.initialized = False #not self.monocular
                     self.submap_init = False
                     # self.submap_list.append(self.active_submap)                    
                     n1 =time.time()
@@ -484,9 +831,9 @@ class BackEnd(mp.Process):
                     print("")
                     print("reset, and initialize new map time = "+str(n2-n1))
                     print("")
-                elif data[0] == "color_refinement":
-                    self.color_refinement()
-                    self.push_to_frontend()
+                # elif data[0] == "color_refinement":
+                #     self.color_refinement()
+                #     self.push_to_frontend()
                 elif data[0] == "init":
                     i1= time.time()
                     cur_frame_idx = data[1]
@@ -495,12 +842,15 @@ class BackEnd(mp.Process):
                     self.submap_init = False
                     Log("Resetting the system")
                     # self.reset()                    
+                 
                     self.initialize_sub_map(viewpoint,True) 
+         
                     self.add_next_kf(
                         cur_frame_idx, viewpoint, depth_map=depth_map, init=True
-                    )   
+                    )  
+           
                     self.initialize_map(viewpoint)#cur_frame_idx,viewpoint)   
-                                                               
+                                                      
                     self.push_to_frontend("init")
                     i2= time.time()
                     print("")
@@ -516,11 +866,13 @@ class BackEnd(mp.Process):
                     current_window = data[3]
                     depth_map = data[4]
                     kf_idx = data[5]         
-                
+                    self.check_mem("before0_kf back")
                     self.active_submap.viewpoints[cur_frame_idx] = viewpoint
                     self.active_submap.current_window = current_window
                     self.active_submap.kf_idx = kf_idx
+                    self.check_mem("before_kf back")
                     self.add_next_kf(cur_frame_idx, self.active_submap.viewpoints[cur_frame_idx], depth_map=depth_map)
+                    self.check_mem("after_kf back")
                     self.submap_init = True
                     opt_params = []
                     frames_to_optimize = self.config["Training"]["pose_window"]
@@ -581,14 +933,16 @@ class BackEnd(mp.Process):
                         )
                     self.keyframe_optimizers = torch.optim.Adam(opt_params)
                     # print("keyframe2")
-                   
+                    self.check_mem("after_kf back2")
                     km1= time.time()
                     self.map(self.active_submap, iters=iter_per_kf)
                     km2= time.time()                  
                     self.map(self.active_submap, prune=True)
                     km3= time.time()
+                    self.check_mem("after_kf back3")
                     self.push_to_frontend("keyframe")
-                    k2 = time.time()        
+                    k2 = time.time()   
+                    torch.cuda.empty_cache()     
                     # print("")   
                     # print("km1 time = "+str(km2-km1))
                     # print("km2 time = "+str(km3-km2))

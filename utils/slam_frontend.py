@@ -351,7 +351,7 @@ class FrontEnd(mp.Process):
         toc = torch.cuda.Event(enable_timing=True)
 
         while True:
-
+           
             #여기부터 진짜 시작
             if self.frontend_queue.empty():
                 # print("empty")
@@ -427,7 +427,7 @@ class FrontEnd(mp.Process):
                     cur_frame_idx += 1
                     continue
 
-                last_keyframe_idx = self.current_window[-1]
+                last_keyframe_idx = self.current_window[0]
                 # print("last = %i " %last_keyframe_idx)
                 check_time = (cur_frame_idx - last_keyframe_idx) >= self.kf_interval
                 curr_visibility = (render_pkg["n_touched"] > 0).long()
@@ -501,6 +501,7 @@ class FrontEnd(mp.Process):
                
                 if (
                     self.save_results
+                    and len(self.kf_indices) >=4 
                     and self.save_trj
                     and create_kf
                     and len(self.kf_indices) % self.save_trj_kf_intv == 0
