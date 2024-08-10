@@ -21,6 +21,14 @@ from torch.autograd import Variable
 def l1_loss(network_output, gt):
     return torch.abs((network_output - gt)).mean()
 
+def l1_loss_log_pow(network_output, gt):
+    return torch.square(torch.abs(torch.log(network_output) - torch.log(gt)).mean())
+
+def l2_loss_log(network_output, gt):
+    return ((torch.log(network_output) - torch.log(gt)) ** 2).mean()
+
+def l2_loss(network_output, gt):
+    return ((network_output - gt) ** 2).mean()
 
 def l1_loss_weight(network_output, gt):
     image = gt.detach().cpu().numpy().transpose((1, 2, 0))
@@ -33,11 +41,6 @@ def l1_loss_weight(network_output, gt):
     sobel_merge = torch.from_numpy(sobel_merge)[None, ...].to(gt.device)
 
     return torch.abs((network_output - gt) * sobel_merge).mean()
-
-
-def l2_loss(network_output, gt):
-    return ((network_output - gt) ** 2).mean()
-
 
 def gaussian(window_size, sigma):
     gauss = torch.Tensor(

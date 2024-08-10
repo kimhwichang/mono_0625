@@ -21,7 +21,9 @@ class ReplicaParser:
         self.input_folder = input_folder
         self.color_paths = sorted(glob.glob(f"{self.input_folder}/results/frame*.jpg"))
         self.depth_paths = sorted(glob.glob(f"{self.input_folder}/results/depth*.png"))
+        # self.n_img = len(self.color_paths[:300])
         self.n_img = len(self.color_paths)
+        print(self.n_img)
         self.load_poses(f"{self.input_folder}/traj.txt")
 
     def load_poses(self, path):
@@ -30,6 +32,7 @@ class ReplicaParser:
             lines = f.readlines()
 
         frames = []
+        # for i in range(300):
         for i in range(self.n_img):
             line = lines[i]
             pose = np.array(list(map(float, line.split()))).reshape(4, 4)
@@ -85,7 +88,7 @@ class TUMParser:
 
         image_data = self.parse_list(image_list)
         depth_data = self.parse_list(depth_list)
-        pose_list = "/workspace/Data/TUM/rgbd_dataset_freiburg1_desk/groundtruth.txt"
+        # pose_list = "/workspace/Data/TUM/rgbd_dataset_freiburg2_xyz/groundtruth.txt"
         pose_data = self.parse_list(pose_list, skiprows=1)
         pose_vecs = pose_data[:, 0:].astype(np.float64)
 
@@ -104,6 +107,7 @@ class TUMParser:
         self.color_paths, self.poses, self.depth_paths, self.frames = [], [], [], []
 
         for ix in indicies:
+           
             (i, j, k) = associations[ix]
             self.color_paths += [os.path.join(datapath, image_data[i, 1])]
             self.depth_paths += [os.path.join(datapath, depth_data[j, 1])]
@@ -206,6 +210,8 @@ class uHumanParser:
         #     pose_list = os.path.join(datapath, "gt_trans_a1_rgbd.txt")
         if os.path.isfile(os.path.join(datapath, "associated_gt.txt")):
             pose_list = os.path.join(datapath, "associated_gt.txt")
+        # if os.path.isfile(os.path.join(datapath, "reverse_gt.txt")):
+        #     pose_list = os.path.join(datapath, "reverse_gt.txt")
         img_path = os.path.join(datapath,"left")
         depth_path = os.path.join(datapath,"depth")
 
@@ -217,8 +223,9 @@ class uHumanParser:
         pose_vecs = pose_data[:, 0:].astype(np.float64)
         self.color_paths, self.poses, self.depth_paths, self.frames = [], [], [], []
 
-        for i in range (num_data-2):
-           
+        for i in range (500):#(num_data-2):#(720,1400):
+            
+            j = 1778-i
             self.color_paths += [os.path.join(img_path, img_list[i])]
             self.depth_paths += [os.path.join(depth_path,img_list[i])]
 
@@ -227,7 +234,8 @@ class uHumanParser:
             T = trimesh.transformations.quaternion_matrix(np.roll(quat, 1))
             T[:3, 3] = trans
             self.poses += [np.linalg.inv(T)]
-
+            # print(str(os.path.join(img_path, img_list[j])))
+            # print(str(os.path.join(depth_path, img_list[j])))
             frame = {
                 "file_path": str(os.path.join(img_path, img_list[i])),
                 "depth_path": str(os.path.join(depth_path, img_list[i])),
@@ -312,6 +320,7 @@ class MonocularDataset(BaseDataset):
             image = cv2.remap(image, self.map1x, self.map1y, cv2.INTER_LINEAR)
 
         if self.has_depth:
+            # print("has depth")
             depth_path = self.depth_paths[idx]
             depth = np.array(Image.open(depth_path)) / self.depth_scale
 

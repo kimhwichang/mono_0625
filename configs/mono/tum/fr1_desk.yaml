@@ -1,7 +1,7 @@
 inherit_from: "configs/mono/tum/base_config.yaml"
 
 Dataset:
-  dataset_path: "../Data/TUM/rgbd_dataset_freiburg1_desk/"
+  dataset_path: "/media/hcschool/GG/Data/TUM/rgbd_dataset_freiburg1_desk/"
   Calibration:
     fx: 517.306408
     fy: 516.469215
