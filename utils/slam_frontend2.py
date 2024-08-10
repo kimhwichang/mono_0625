@@ -506,10 +506,7 @@ class FrontEnd(mp.Process):
         print("[f-n]last kf = %i" % self.last_kf)
         # print("f  : tag = new map")
         self.requested_new_submap = True
-        # if self.use_gui:
-        #     self.q_main2vis.put(gui_utils.GaussianPacket(finish=True))
-        #     self.gui_process.join()
-        #     Log("GUI Stopped and joined the main thread")
+        
 
         
     def request_reset_submap(self, cur_frame_idx, viewpoint,depth_map):
@@ -649,6 +646,10 @@ class FrontEnd(mp.Process):
                     self.submap_list.append(self.active_submap)
                     if self.save_results:
                         self.eval_("final_submap_finish")
+                        if self.use_gui:
+                            self.q_main2vis.put(gui_utils.GaussianPacket(finish=True))
+                            self.gui_process.join()
+                            Log("GUI Stopped and joined the main thread")
                         # eval_ate(
                         #     self.submap_list,
                         #     self.active_submap,
