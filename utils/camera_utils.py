@@ -1,6 +1,6 @@
 import torch
 from torch import nn
-
+import gc
 from gaussian_splatting.utils.graphics_utils import getProjectionMatrix2, getWorld2View2
 from utils.slam_utils import image_gradient, image_gradient_mask
 
@@ -27,9 +27,9 @@ class Camera(nn.Module):
         self.uid = uid
         self.device = device
 
-        T = torch.eye(4, device=device)
-        self.R = T[:3, :3]
-        self.T = T[:3, 3]
+        self.T_W = torch.eye(4, device=device)
+        self.R = self.T_W[:3, :3]
+        self.T = self.T_W[:3, 3]
         self.R_gt = gt_T[:3, :3]
         self.T_gt = gt_T[:3, 3]
 
@@ -61,7 +61,24 @@ class Camera(nn.Module):
         )
 
         self.projection_matrix = projection_matrix.to(device=device)
+    
+    def reset_view_param(self):
+        self.cam_rot_delta = nn.Parameter(
+                torch.zeros(3, requires_grad=True, device=self.device)
+        )
+        self.cam_trans_delta = nn.Parameter(
+            torch.zeros(3, requires_grad=True, device=self.device)
+        )
 
+        self.exposure_a = nn.Parameter(
+            torch.tensor([0.0], requires_grad=True, device=self.device)
+        )
+        self.exposure_b = nn.Parameter(
+            torch.tensor([0.0], requires_grad=True, device=self.device)
+        )
+    
+    
+    
     @staticmethod
     def init_from_dataset(dataset, idx, projection_matrix):
         gt_color, gt_depth, gt_pose = dataset[idx]
@@ -110,6 +127,8 @@ class Camera(nn.Module):
     def update_RT(self, R, t):
         self.R = R.to(device=self.device)
         self.T = t.to(device=self.device)
+        # self.T_W[:3, :3] = self.R 
+        # self.T_W[:3, 3] = self.T   
 
     def compute_grad_mask(self, config):
         edge_threshold = config["Training"]["edge_threshold"]
@@ -150,5 +169,59 @@ class Camera(nn.Module):
         self.cam_rot_delta = None
         self.cam_trans_delta = None
 
+        self.exposure_a = None
+        self.exposure_b = None
+    
+    
+    def viewpoints_to_cpu(self):
+        tmp_original_image = self.original_image.detach().to("cpu")
+        tmp_cam_rot_delta = self.cam_rot_delta.detach().to("cpu")
+        tmp_cam_trans_delta = self.cam_trans_delta.detach().to("cpu")
+        tmp_exposure_a = self.exposure_a.detach().to("cpu")
+        tmp_exposure_b = self.exposure_b.detach().to("cpu")
+        tmp_R = self.R.detach().to("cpu")
+        tmp_T = self.T.detach().to("cpu")
+        tmp_grad_mask = self.grad_mask.detach().to("cpu")
+        del self.original_image
+        del self.cam_rot_delta
+        del self.cam_trans_delta
+        del self.exposure_a
+        del self.exposure_b
+        del self.R
+        del self.T
+        del self.grad_mask
+        torch.cuda.empty_cache()
+        gc.collect()
+        self.original_image = tmp_original_image
+        self.cam_rot_delta = tmp_cam_rot_delta
+        self.cam_trans_delta = tmp_cam_trans_delta
+        self.exposure_a = tmp_exposure_a
+        self.exposure_b = tmp_exposure_b
+        self.R = tmp_R
+        self.T = tmp_T
+        self.grad_mask= tmp_grad_mask
+        
+    def clean2(self):
+        self.original_image.to("cpu")
+        torch.cuda.empty_cache()
+        gc.collect()
+        self.original_image = None
+        self.depth = None
+        self.grad_mask = None
+        
+        self.cam_rot_delta.to("cpu")
+        torch.cuda.empty_cache()
+        gc.collect()
+        self.cam_trans_delta.to("cpu")
+        torch.cuda.empty_cache()
+        gc.collect()
+        self.exposure_a.to("cpu")
+        torch.cuda.empty_cache()
+        gc.collect()
+        self.exposure_b.to("cpu")
+        torch.cuda.empty_cache()
+        gc.collect()
+        self.cam_rot_delta = None
+        self.cam_trans_delta = None
         self.exposure_a = None
         self.exposure_b = None

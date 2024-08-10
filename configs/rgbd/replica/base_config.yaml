@@ -2,9 +2,9 @@ Results:
   save_results: True
   save_dir: "results"
   save_trj: True
-  save_trj_kf_intv: 20
-  use_gui: True
-  eval_rendering: False
+  save_trj_kf_intv: 1
+  use_gui: False
+  eval_rendering: True
   use_wandb: False
 
 Dataset:
@@ -45,6 +45,7 @@ Training:
   gaussian_reset: 2001
   size_threshold: 20
   kf_interval: 4
+  max_kf_size: 4
   window_size: 10
   pose_window: 5
   edge_threshold: 4

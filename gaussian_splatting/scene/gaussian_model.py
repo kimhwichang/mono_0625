@@ -10,7 +10,7 @@
 #
 
 import os
-
+import gc
 import numpy as np
 import open3d as o3d
 import torch
@@ -73,6 +73,37 @@ class GaussianModel:
         symm = strip_symmetric(actual_covariance)
         return symm
 
+    def reset(self) :
+        tmp_xyz  = self._xyz.detach().to("cpu")
+        tmp_features_dc = self._features_dc.to("cpu")
+        tmp_features_rest = self._features_rest.to("cpu")
+        tmp_scaling = self._scaling.to("cpu")
+        tmp_rotation = self._rotation.to("cpu")
+        tmp_opacity = self._opacity.to("cpu")
+        tmp_max_radii2D = self.max_radii2D.to("cpu")
+        tmp_xyz_gradient_accum = self.xyz_gradient_accum.to("cpu")
+        
+        del self._xyz
+        del self._features_dc
+        del self._features_rest
+        del self._scaling
+        del self._rotation
+        del self._opacity
+        del self.max_radii2D
+        del self.xyz_gradient_accum
+        
+        self._xyz = tmp_xyz
+        self._features_dc = tmp_features_dc
+        self._features_rest = tmp_features_rest
+        self._scaling = tmp_scaling
+        self._rotation = tmp_rotation
+        self._opacity = tmp_opacity
+        self.max_radii2D = tmp_max_radii2D
+        self.xyz_gradient_accum = tmp_xyz_gradient_accum
+        torch.cuda.empty_cache()
+        gc.collect()
+    
+           
     @property
     def get_scaling(self):
         return self.scaling_activation(self._scaling)
@@ -503,9 +534,10 @@ class GaussianModel:
         return optimizable_tensors
 
     def prune_points(self, mask):
+  
         valid_points_mask = ~mask
         optimizable_tensors = self._prune_optimizer(valid_points_mask)
-
+  
         self._xyz = optimizable_tensors["xyz"]
         self._features_dc = optimizable_tensors["f_dc"]
         self._features_rest = optimizable_tensors["f_rest"]
@@ -514,11 +546,14 @@ class GaussianModel:
         self._rotation = optimizable_tensors["rotation"]
 
         self.xyz_gradient_accum = self.xyz_gradient_accum[valid_points_mask]
-
+   
         self.denom = self.denom[valid_points_mask]
         self.max_radii2D = self.max_radii2D[valid_points_mask]
+   
         self.unique_kfIDs = self.unique_kfIDs[valid_points_mask.cpu()]
+   
         self.n_obs = self.n_obs[valid_points_mask.cpu()]
+    
 
     def cat_tensors_to_optimizer(self, tensors_dict):
         optimizable_tensors = {}
