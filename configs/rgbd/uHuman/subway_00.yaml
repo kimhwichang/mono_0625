@@ -1,7 +1,7 @@
 inherit_from: "configs/rgbd/uHuman/base_config.yaml"
 
 Dataset:
-  dataset_path: "/workspace/Data/uHuman/apartment_scene/uHumans2_apartment_s1_00h"
+  dataset_path: "/workspace/Data/uHuman/subway_scene/uHumans2_subway_s1_00h"
   Calibration:
     fx: 415.69219
     fy: 415.69219

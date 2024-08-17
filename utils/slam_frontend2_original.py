@@ -8,7 +8,7 @@ import cv2
 from tqdm import tqdm
 from gaussian_splatting.gaussian_renderer import render
 from gaussian_splatting.utils.graphics_utils import getProjectionMatrix2, getWorld2View2
-from gui import gui_utils
+from gui import gui_utils, slam_gui
 from gaussian_splatting.utils.loss_utils import l1_loss, ssim, l1_loss_log_pow, l2_loss_log 
 from utils.camera_utils import Camera
 from utils.eval_utils import eval_ate, save_gaussians, eval_rendering_ ,eval_ate_
@@ -28,15 +28,18 @@ class FrontEnd(mp.Process):
         self.frontend_queue = None
         self.backend_queue = None
         self.q_main2vis = None
-        self.q_vis2main = None
-        
+        self.q_vis2main = None  
+        self.use_gui = False
+        self.dataset = None
         self.initialized = False
         self.kf_indices = []
         self.submap_list =[]
         self.monocular = config["Training"]["monocular"]
         self.iteration_count = 0
         self.occ_aware_visibility = {}
-        self.active_submap = None
+        self.active_submap = None   
+        self.gui_process = None
+ 
 
         self.reset = True
         self.requested_init = False
@@ -504,6 +507,8 @@ class FrontEnd(mp.Process):
         # print("f  : tag = new map")
         self.requested_new_submap = True
         
+
+        
     def request_reset_submap(self, cur_frame_idx, viewpoint,depth_map):
                  
         msg = ["reset", cur_frame_idx,viewpoint,depth_map]
@@ -529,7 +534,22 @@ class FrontEnd(mp.Process):
             
             for kf_id in self.active_submap.current_window:
                 kf = self.active_submap.viewpoints[kf_id]           
-                self.cameras[kf_id].update_RT(kf.R.clone(), kf.T.clone())                
+                self.cameras[kf_id].update_RT(kf.R.clone(), kf.T.clone())      
+            
+            
+            if  data[0]=="init" and self.use_gui:
+               
+                self.params_gui = gui_utils.ParamsGUI(
+                pipe=self.pipeline_params,
+                background=clone_obj(self.active_submap.background),
+                gaussians=clone_obj(self.active_submap.gaussians),
+                q_main2vis=self.q_main2vis,
+                q_vis2main=self.q_vis2main,
+                )
+               
+                self.gui_process = mp.Process(target=slam_gui.run, args=(self.params_gui,))
+                self.gui_process.start()
+                time.sleep(5)
             
             
         else :
@@ -626,6 +646,10 @@ class FrontEnd(mp.Process):
                     self.submap_list.append(self.active_submap)
                     if self.save_results:
                         self.eval_("final_submap_finish")
+                        if self.use_gui:
+                            self.q_main2vis.put(gui_utils.GaussianPacket(finish=True))
+                            self.gui_process.join()
+                            Log("GUI Stopped and joined the main thread")
                         # eval_ate(
                         #     self.submap_list,
                         #     self.active_submap,
@@ -677,6 +701,20 @@ class FrontEnd(mp.Process):
                 #tr1 = time.time()    
                 # self.check_mem("before")
                 render_pkg = self.tracking(cur_frame_idx, viewpoint)
+                
+                current_window_dict = {}
+                current_window_dict[self.active_submap.current_window[0]] = self.active_submap.current_window[1:]
+                keyframes = [self.cameras[kf_idx] for kf_idx in self.active_submap.current_window]
+
+                self.q_main2vis.put(
+                    gui_utils.GaussianPacket(
+                        gaussians=clone_obj(self.active_submap.gaussians),
+                        current_frame=viewpoint,
+                        keyframes=keyframes,
+                        kf_window=current_window_dict,
+                    )
+                )               
+                
                 #tr2 = time.time()
                 # self.check_mem("after")
                 if self.requested_keyframe > 0:

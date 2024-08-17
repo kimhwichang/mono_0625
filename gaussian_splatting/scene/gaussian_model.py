@@ -103,7 +103,93 @@ class GaussianModel:
         torch.cuda.empty_cache()
         gc.collect()
     
-           
+    # def to_gpu(self) :
+        
+    #     self._xyz = nn.Parameter(
+    #         torch.tensor(self._xyz, dtype=torch.float, device="cuda").requires_grad_(True)
+    #     )
+    #     self._features_dc = nn.Parameter(
+    #         torch.tensor(self._features_dc, dtype=torch.float, device="cuda")
+            
+    #         .contiguous()
+    #         .requires_grad_(True)
+    #     )
+    #     self._features_rest = nn.Parameter(
+    #         torch.tensor(self._features_rest, dtype=torch.float, device="cuda")      
+    #         .contiguous()
+    #         .requires_grad_(True)
+    #     )
+    #     self._opacity = nn.Parameter(
+    #         torch.tensor(self._opacity, dtype=torch.float, device="cuda").requires_grad_(
+    #             True
+    #         )
+    #     )
+    #     self._scaling = nn.Parameter(
+    #         torch.tensor(self._scaling, dtype=torch.float, device="cuda").requires_grad_(True)
+    #     )
+    #     self._rotation = nn.Parameter(
+    #         torch.tensor(self._rotation, dtype=torch.float, device="cuda").requires_grad_(True)
+    #     ) 
+    def to_gpu(self) :
+        
+        self._xyz = self._xyz.clone().detach().requires_grad_(True)        
+        self._features_dc = self._features_dc.clone().detach().requires_grad_(True)
+        self._features_rest =self._features_rest.clone().detach().requires_grad_(True)
+        self._opacity =self._opacity.clone().detach().requires_grad_(True)
+        self._scaling = self._scaling.clone().detach().requires_grad_(True)
+        self._rotation = self._rotation.clone().detach().requires_grad_(True)
+            
+    def training_setup_ba(self, training_args):
+        self.percent_dense = training_args.percent_dense
+        self.max_radii2D = torch.zeros((self.get_xyz.shape[0]), device="cuda") 
+        self.xyz_gradient_accum = torch.zeros((self.get_xyz.shape[0], 1), device="cuda")
+        self.denom = torch.zeros((self.get_xyz.shape[0], 1), device="cuda")
+        self.to_gpu()
+        l = [
+            {
+                "params": [self._xyz],
+                "lr": training_args.position_lr_init * self.spatial_lr_scale,
+                "name": "xyz",
+            },
+            {
+                "params": [self._features_dc],
+                "lr": training_args.feature_lr,
+                "name": "f_dc",
+            },
+            {
+                "params": [self._features_rest],
+                "lr": training_args.feature_lr / 20.0,
+                "name": "f_rest",
+            },
+            {
+                "params": [self._opacity],
+                "lr": training_args.opacity_lr,
+                "name": "opacity",
+            },
+            {
+                "params": [self._scaling],
+                "lr": training_args.scaling_lr * self.spatial_lr_scale,
+                "name": "scaling",
+            },
+            {
+                "params": [self._rotation],
+                "lr": training_args.rotation_lr,
+                "name": "rotation",
+            },
+        ]
+
+        self.optimizer = torch.optim.Adam(l, lr=0.0, eps=1e-15)
+        self.xyz_scheduler_args = get_expon_lr_func(
+            lr_init=training_args.position_lr_init * self.spatial_lr_scale,
+            lr_final=training_args.position_lr_final * self.spatial_lr_scale,
+            lr_delay_mult=training_args.position_lr_delay_mult,
+            max_steps=training_args.position_lr_max_steps,
+        )
+
+        self.lr_init = training_args.position_lr_init * self.spatial_lr_scale
+        self.lr_final = training_args.position_lr_final * self.spatial_lr_scale
+        self.lr_delay_mult = training_args.position_lr_delay_mult
+        self.max_steps = training_args.position_lr_max_steps       
     @property
     def get_scaling(self):
         return self.scaling_activation(self._scaling)

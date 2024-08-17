@@ -91,3 +91,22 @@ def update_pose(camera, converged_threshold=1e-4):
     camera.cam_rot_delta.data.fill_(0)
     camera.cam_trans_delta.data.fill_(0)
     return converged
+
+def update_pose_(camera, converged_threshold=1e-6):
+    tau = torch.cat([camera.cam_trans_delta, camera.cam_rot_delta], axis=0)
+
+    T_w2c = torch.eye(4, device=tau.device)
+    T_w2c[0:3, 0:3] = camera.R
+    T_w2c[0:3, 3] = camera.T
+
+    new_w2c = SE3_exp(tau) @ T_w2c
+
+    new_R = new_w2c[0:3, 0:3]
+    new_T = new_w2c[0:3, 3]
+
+    converged = tau.norm() < converged_threshold
+    camera.update_RT(new_R, new_T)
+
+    camera.cam_rot_delta.data.fill_(0)
+    camera.cam_trans_delta.data.fill_(0)
+    return converged

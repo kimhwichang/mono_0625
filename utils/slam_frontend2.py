@@ -549,8 +549,7 @@ class FrontEnd(mp.Process):
                
                 self.gui_process = mp.Process(target=slam_gui.run, args=(self.params_gui,))
                 self.gui_process.start()
-                time.sleep(5)
-            
+                time.sleep(5)            
             
         else :
             

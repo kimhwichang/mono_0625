@@ -368,9 +368,9 @@ class FrontEnd(mp.Process):
                             final=True,
                             monocular=self.monocular,
                         )
-                        save_gaussians(
-                            self.gaussians, self.save_dir, "final", final=True
-                        )
+                        # save_gaussians(
+                        #     self.gaussians, self.save_dir, "final", final=True
+                        # )
                     break
                 
                 #request_init 일경우 backend의 init -> continue

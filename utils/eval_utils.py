@@ -22,7 +22,7 @@ from gaussian_splatting.utils.system_utils import mkdir_p
 from utils.logging_utils import Log
 
 
-def evaluate_evo(poses_gt, poses_est, plot_dir, label, monocular=False):
+def evaluate_evo(poses_gt, poses_est, plot_dir, label, monocular=False,tag_ ="Eval"):
     ## Plot
     traj_ref = PosePath3D(poses_se3=poses_gt)
     traj_est = PosePath3D(poses_se3=poses_est)
@@ -37,7 +37,7 @@ def evaluate_evo(poses_gt, poses_est, plot_dir, label, monocular=False):
     ape_metric.process_data(data)
     ape_stat = ape_metric.get_statistic(metrics.StatisticsType.rmse)
     ape_stats = ape_metric.get_all_statistics()
-    Log("RMSE ATE \[m]", ape_stat, tag="Eval")
+    Log("RMSE ATE \[m]", ape_stat, tag=tag_)
 
     with open(
         os.path.join(plot_dir, "stats_{}.json".format(str(label))),
@@ -66,47 +66,7 @@ def evaluate_evo(poses_gt, poses_est, plot_dir, label, monocular=False):
     plt.close() # closes the current figure
     return ape_stat
 
-def evaluate_evo_(poses_gt, poses_est,plot_dir,label,monocular=False,tag_=""):
-    ## Plot
-    traj_ref = PosePath3D(poses_se3=poses_gt)
-    traj_est = PosePath3D(poses_se3=poses_est)
-    traj_est_aligned = trajectory.align_trajectory(
-        traj_est, traj_ref, correct_scale=monocular
-    )
-
-    ## RMSE
-    pose_relation = metrics.PoseRelation.translation_part
-    data = (traj_ref, traj_est_aligned)
-    ape_metric = metrics.APE(pose_relation)
-    ape_metric.process_data(data)
-    ape_stat = ape_metric.get_statistic(metrics.StatisticsType.rmse)
-    ape_stats = ape_metric.get_all_statistics()
-    Log("RMSE ATE \[m]", ape_stat, tag=tag_)
-    
-    
-    plot_mode = evo.tools.plot.PlotMode.xy
-    fig = plt.figure()
-    ax = evo.tools.plot.prepare_axis(fig, plot_mode)
-    ax.set_title(f"ATE RMSE: {ape_stat}")
-    evo.tools.plot.traj(ax, plot_mode, traj_ref, "--", "gray", "gt")
-    evo.tools.plot.traj_colormap(
-        ax,
-        traj_est_aligned,
-        ape_metric.error,
-        plot_mode,
-        min_map=ape_stats["min"],
-        max_map=ape_stats["max"],
-    )
-    ax.legend()
-    plt.savefig(os.path.join(plot_dir, "evo_2dplot_{}.png".format(str(label))), dpi=90)
-    plt.cla()   # clear the current axes
-    plt.clf()   # clear the current figure
-    plt.close() # closes the current figure
-    return ape_stat
-
-
-
-def eval_ate(submap_list, sub_, save_dir, iterations, final=False, monocular=False,new_submap = False,tag=""):
+def eval_ate(submap_list, sub_, save_dir, iterations, final=False, monocular=False,new_submap = False,tag="Eval"):
     trj_data = dict()
     latest_frame_idx = sub_.kf_idx[-1] + 2 if final else sub_.kf_idx[-1] + 1
     trj_id, trj_est, trj_gt = [], [], []
@@ -127,7 +87,7 @@ def eval_ate(submap_list, sub_, save_dir, iterations, final=False, monocular=Fal
         pose = pose@M
         return pose
     if tag == "before" :
-        print("before!")
+        # print("before!")
         new_submap = False       
     final_index = 0 
     if(len(submap_list)==0): 
@@ -163,7 +123,7 @@ def eval_ate(submap_list, sub_, save_dir, iterations, final=False, monocular=Fal
                 trj_gt_np.append(pose_gt)
 
         if(not final and not new_submap):
-            print("not final")
+            # print("not final")
             for kf_id in sub_.kf_idx:          
 
                 kf = sub_.viewpoints[kf_id]
@@ -201,10 +161,11 @@ def eval_ate(submap_list, sub_, save_dir, iterations, final=False, monocular=Fal
         plot_dir=plot_dir,
         label=label_evo,
         monocular=monocular,
+        tag_=tag
     )
     with open(os.path.join(pose_dir,"pose_timeline.txt"),"a",encoding="utf-8") as f:
         f.write(str(iterations) +" : "+str(round(ate,6))+"\n")
-    wandb.log({"frame_idx": latest_frame_idx, "ate": ate})
+    # wandb.log({"frame_idx": latest_frame_idx, "ate": ate})
             
     return ate
 
@@ -246,7 +207,7 @@ def eval_ate_(sub_, tag_="", save_dir = "", monocular=False):
     plot_dir = os.path.join(save_dir, "plot")
     mkdir_p(plot_dir)
     label_evo = "{:04}".format(last_idx)
-    ate = evaluate_evo_(
+    ate = evaluate_evo(
         poses_gt=trj_gt_np,
         poses_est=trj_est_np,   
         plot_dir = plot_dir, 
@@ -305,7 +266,7 @@ def eval_ate2(frames, kf_ids, save_dir, iterations, final=False, monocular=False
     )
     with open(os.path.join(pose_dir,"pose_timeline.txt"),"a",encoding="utf-8") as f:
         f.write(str(iterations) +" : "+str(round(ate,6))+"\n")
-    wandb.log({"frame_idx": latest_frame_idx, "ate": ate})
+    # wandb.log({"frame_idx": latest_frame_idx, "ate": ate})
     return ate
 
 def eval_rendering(
@@ -338,17 +299,12 @@ def eval_rendering(
             continue
         saved_frame_idx.append(idx)
         frame = frames[idx]
-        # pose = torch.eye(4)
-        # pose[0:3, 0:3] = frame.R.clone()
-        # pose[0:3, 3] = frame.T.clone()
-        # pose = pose@anchor_pose
-        # frame.R = pose[0:3, 0:3].to("cuda")
-        # frame.t = pose[0:3, 3].to("cuda")        
-        gt_image, _, _ = dataset[idx]
+    
+        gt_image, _, _ = dataset[idx]        
         rendering = render(frame, gaussians, pipe, background)["render"]
         image = torch.clamp(rendering, 0.0, 1.0)
         im = (image.detach().cpu().numpy().transpose((1, 2, 0)) * 255).astype(np.uint8)
-        im2= cv2.cvtColor(im, cv2.COLOR_BGR2RGB)
+        im2= cv2.cvtColor(im, cv2.COLOR_BGR2RGB)       
         # print(iteration=="before_opt")
         if(iteration=="before_opt"):
             image_name = "/workspace/MonoGS/slam2/frame_%i.png"%idx 
@@ -358,11 +314,11 @@ def eval_rendering(
             image_name = "/workspace/MonoGS/slam/frame_%i.png"%idx 
         # print(image_name)
         cv2.imwrite(image_name,im2)
+        gt = (gt_image.detach().cpu().numpy().transpose((1, 2, 0)) * 255).astype(np.uint8)
 
-        gt = (gt_image.cpu().numpy().transpose((1, 2, 0)) * 255).astype(np.uint8)
         pred = (image.detach().cpu().numpy().transpose((1, 2, 0)) * 255).astype(
             np.uint8
-        )
+        )     
         gt = cv2.cvtColor(gt, cv2.COLOR_BGR2RGB)
         pred = cv2.cvtColor(pred, cv2.COLOR_BGR2RGB)
         img_pred.append(pred)

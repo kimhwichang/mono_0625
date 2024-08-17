@@ -1,5 +1,6 @@
 import random
 import time
+import copy
 import gc
 import torch
 import torch.multiprocessing as mp
@@ -636,7 +637,7 @@ class BackEnd(mp.Process):
         keyframes = []
         for kf_idx in self.active_submap.current_window:
             kf = self.active_submap.viewpoints[kf_idx]
-            keyframes.append((kf_idx, kf.R.clone(), kf.T.clone()))
+            keyframes.append((kf_idx, kf.R.clone().to("cpu"), kf.T.clone().to("cpu")))
       
         last_ = self.active_submap.current_window[0]      
         if(tag=="init" or tag=="new_map" or tag=="reset"):
@@ -647,7 +648,8 @@ class BackEnd(mp.Process):
         else :
             # msg = [tag, self.active_submap.gaussians, self.active_submap.occ_aware_visibility,keyframes]
             # print("[keyframe # %i] bb : tag = %s " %(last_ ,tag))  
-            msg = [tag, clone_obj(self.active_submap.gaussians), self.active_submap.occ_aware_visibility,keyframes]
+            occ_ = copy.deepcopy(self.active_submap.occ_aware_visibility)      
+            msg = [tag, clone_obj(self.active_submap.gaussians), occ_,keyframes]
             self.frontend_queue.put(msg)
 
     def run(self):
@@ -687,7 +689,7 @@ class BackEnd(mp.Process):
                     # print("pmap time = "+str(pm2-pm1))
                     # print("")
             else:
-                print("num of backend queue = %i " %self.backend_queue.qsize())
+                # print("num of backend queue = %i " %self.backend_queue.qsize())
                 data = self.backend_queue.get()
                 if data[0] == "stop":
                     break

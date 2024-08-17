@@ -130,6 +130,14 @@ class Camera(nn.Module):
         # self.T_W[:3, :3] = self.R 
         # self.T_W[:3, 3] = self.T   
 
+    def update_RT_cpu(self, R, t):
+        self.R = R.clone().to("cpu")
+        self.T = t.clone().to("cpu")
+        
+    def update_RT_gpu(self, R, t):
+        self.R = R.clone().cuda()
+        self.T = t.clone().cuda()
+        
     def compute_grad_mask(self, config):
         edge_threshold = config["Training"]["edge_threshold"]
 
@@ -172,7 +180,7 @@ class Camera(nn.Module):
         self.exposure_a = None
         self.exposure_b = None
     
-    
+   
     def viewpoints_to_cpu(self):
         tmp_original_image = self.original_image.detach().to("cpu")
         tmp_cam_rot_delta = self.cam_rot_delta.detach().to("cpu")

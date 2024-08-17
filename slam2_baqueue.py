@@ -21,9 +21,9 @@ from utils.logging_utils import Log
 from gaussian_splatting.utils.loss_utils import l1_loss, ssim
 from utils.multiprocessing_utils import FakeQueue
 from utils.slam_backend2 import BackEnd
-from utils.slam_frontend2 import FrontEnd
+from utils.slam_frontend2_baqueue import FrontEnd
 from utils.slam_BA import BA
-
+from utils.multiprocessing_utils import clone_obj
 
 class SLAM:
     def __init__(self, config, save_dir=None):
@@ -60,8 +60,7 @@ class SLAM:
         self.submap_list = []
         frontend_queue = mp.Queue()
         backend_queue = mp.Queue()
-        before_BA_queue = mp.Queue()
-        after_BA_queue = mp.Queue()
+        before_BA_queue = mp.Queue()        
         
         q_main2vis = mp.Queue() if self.use_gui else FakeQueue()
         q_vis2main = mp.Queue() if self.use_gui else FakeQueue()
@@ -71,18 +70,17 @@ class SLAM:
 
         self.frontend = FrontEnd(self.config)
         self.backend = BackEnd(self.config)
-        self.BA = BA()
+        self.BA = BA(self.config)
         self.BA.before_ba_queue = before_BA_queue
-        self.BA.after_ba_queue = after_BA_queue
         self.BA.pipeline_params = self.pipeline_params
+        self.BA.dataset = self.dataset
 
-        self.frontend.dataset = self.dataset
+        self.frontend.dataset = clone_obj(self.dataset)
         self.frontend.pipeline_params = self.pipeline_params
         self.frontend.opt_params = self.opt_params
         self.frontend.frontend_queue = frontend_queue
         self.frontend.backend_queue = backend_queue
         self.frontend.before_ba_queue = before_BA_queue
-        self.frontend.after_ba_queue = after_BA_queue
         self.frontend.q_main2vis = q_main2vis
         self.frontend.q_vis2main = q_vis2main
         self.frontend.set_hyperparams()
@@ -100,26 +98,26 @@ class SLAM:
         frontend_process.start()    
         self.BA.run()         
 
-        print("frontend run break!")
+        print("BA run break!")
         backend_queue.put(["pause"])
         
         end.record()
         torch.cuda.synchronize()
         # empty the frontend queue
-        N_frames = len(self.frontend.cameras)
+        N_frames = len(self.BA.cameras)
         FPS = 0.1
         FPS = N_frames / (start.elapsed_time(end) * 0.001)
         Log("Total time", start.elapsed_time(end) * 0.001, tag="Eval")
         Log("Total FPS", N_frames / (start.elapsed_time(end) * 0.001), tag="Eval")
-        total_submap_num = len(self.frontend.submap_list)
+        total_submap_num = len(self.BA.submap_list)
         if total_submap_num ==0 :
             total_submap_num=1
         print("submap num = %i"%total_submap_num)
-        print("final kf num = %i" %len(self.frontend.kf_indices))
+        print("final kf num = %i" %len(self.BA.kf_indices))
         if self.eval_rendering:
             ATE = eval_ate(
-                    self.frontend.submap_list,
-                    self.frontend.active_submap,
+                    self.BA.submap_list,
+                    self.BA.last_active_submap,
                     self.save_dir,
                     0,
                     final=True,
@@ -130,19 +128,16 @@ class SLAM:
             total_ssim = 0
             total_lpips = 0
             total_frame_num = 0
-            for submap_ in self.frontend.submap_list:
-                self.gaussians = submap_.gaussians
-                kf_indices = submap_.kf_idx    
-                # anchor_frame_matrix = submap_.get_anchor_frame_pose()
+            for submap_ in self.BA.submap_list:              
+        
                 rendering_result = eval_rendering(
-                    self.frontend.cameras,
-                    # anchor_frame_matrix,
-                    self.gaussians,
-                    self.dataset,
+                    self.BA.cameras,                 
+                    submap_.gaussians,
+                    self.BA.dataset,
                     self.save_dir,
                     self.pipeline_params,
                     submap_.background,
-                    kf_indices=kf_indices,
+                    kf_indices=submap_.kf_idx ,
                     iteration="before_opt",
                 )
                 total_psnr+=rendering_result["mean_psnr"]*rendering_result["total frame num"]
@@ -159,63 +154,15 @@ class SLAM:
                 ATE,
                 FPS,
             )
-
-            # re-used the frontend queue to retrive the gaussians from the backend.
             while not frontend_queue.empty():
-                frontend_queue.get()
-            # # backend_queue.put(["color_refinement"])
-            # frontend_queue.put(["color_refinement"])
-            # while True:
-            #     if frontend_queue.empty():
-            #         time.sleep(0.01)
-            #         continue
-            #     data = frontend_queue.get()
-            #     if data[0] == "sync_backend" and frontend_queue.empty():
-            #         # gaussians = data[1]
-            #         # self.gaussians = gaussians
-            #         break
+                frontend_queue.get()       
             print("before_psnr = %f" %float(total_psnr/total_frame_num))
-            # self.frontend.color_refinement()
-            # total_psnr = 0
-            # total_ssim = 0
-            # total_lpips = 0
-            # for submap_ in self.frontend.submap_list:
-            #     self.gaussians = submap_.gaussians
-            #     kf_indices = submap_.kf_idx    
-            #     rendering_result = eval_rendering(
-            #         self.frontend.cameras,
-            #         self.gaussians,
-            #         self.dataset,
-            #         self.save_dir,
-            #         self.pipeline_params,
-            #         submap_.background,
-            #         kf_indices=kf_indices,
-            #         iteration="final",
-            #     )
-            #     total_psnr+=rendering_result["mean_psnr"]
-            #     total_ssim +=rendering_result["mean_ssim"]
-            #     total_lpips +=rendering_result["mean_lpips"]
-            # columns = ["tag", "psnr", "ssim", "lpips", "RMSE ATE", "FPS"]
-            # metrics_table = wandb.Table(columns=columns)
-            # metrics_table.add_data(
-            #     "After",
-            #     total_psnr/total_submap_num,
-            #     total_ssim/total_submap_num,
-            #     total_lpips/total_submap_num,
-            #     ATE,
-            #     FPS,
-            # )
-            # print("final_psnr = %f" %float(total_psnr/total_submap_num))
-            # wandb.log({"Metrics": metrics_table})
-            #save_gaussians(self.gaussians, self.save_dir, "final_after_opt", final=True)
-
+   
         backend_queue.put(["stop"])
         backend_process.join()
+        frontend_process.join()
         Log("Backend stopped and joined the main thread")
-        # if self.use_gui:
-        #     q_main2vis.put(gui_utils.GaussianPacket(finish=True))
-        #     gui_process.join()
-        #     Log("GUI Stopped and joined the main thread")
+
 
     def run(self):
         pass
