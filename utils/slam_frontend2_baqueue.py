@@ -39,6 +39,7 @@ class FrontEnd(mp.Process):
         self.occ_aware_visibility = {}
         self.active_submap = None
 
+        self.map_count =0 
         self.reset = True
         self.requested_init = False
         self.requested_new_submap = False
@@ -210,6 +211,26 @@ class FrontEnd(mp.Process):
                 render_pkg["opacity"],
             )
             pose_optimizer.zero_grad()
+            # gt_image = viewpoint.original_image.cuda()
+            # _, h, w = gt_image.shape
+            # mask_shape = (1, h, w)
+            # rgb_boundary_threshold = self.config["Training"]["rgb_boundary_threshold"]
+            # rgb_pixel_mask = (gt_image.sum(dim=0) > rgb_boundary_threshold).view(*mask_shape)
+            # rgb_pixel_mask = rgb_pixel_mask * viewpoint.grad_mask
+            # loss_i = (opacity * torch.abs(image * rgb_pixel_mask - gt_image * rgb_pixel_mask)).mean()
+            # pose_optimizer.zero_grad()
+            # gt_depth = torch.Tensor(viewpoint.depth).unsqueeze(0).cuda()
+            # depth_pixel_mask = (gt_depth > 0.01).view(*depth.shape)
+            # opacity_mask = (opacity > 0.95).view(*depth.shape)  
+            # depth_mask = depth_pixel_mask * opacity_mask
+            # depth = depth*depth_mask
+            # gt_depth = gt_depth*depth_mask                
+            # gt_depth[torch.where(gt_depth<=1)] =1
+            # depth[torch.where(depth<=1)] =1             
+            # d1 = l1_loss_log_pow(depth,gt_depth)        
+            # d2 = l2_loss_log(depth, gt_depth)               
+            # loss_d = torch.sqrt(d2-0.85*d1)                 
+            # loss_tracking =loss_i*0.9+0.1*loss_d
             loss_tracking = get_loss_tracking( self.config, image, depth, opacity, viewpoint )                         
             loss_tracking.backward()
 
@@ -219,7 +240,7 @@ class FrontEnd(mp.Process):
                 converged = update_pose(viewpoint)
        
             if converged:       
-                # print("[converge]trcaking_itr =  %i" %tracking_itr)   
+                print("[converge]trcaking_itr =  %i" %tracking_itr)   
                 break    
         
         # print("[finish]trcaking_itr =  %i" %tracking_itr)   
@@ -274,9 +295,10 @@ class FrontEnd(mp.Process):
         
         # if(cur_frame_idx % 352 ==0 ):
         #     return True      
-        if (self.active_submap.get_submap_size()>=self.max_kf_size):
+        if (self.active_submap.get_submap_size()>=self.max_kf_size) and ( (len(self.dataset)-cur_frame_idx)>= self.max_kf_size*self.kf_interval)  :
             print("active map size exceed max kf size %i , create new sub map!"%self.active_submap.get_submap_size())
-            return True    
+            return True  
+
         return  False
     
     def add_to_window(
@@ -346,11 +368,9 @@ class FrontEnd(mp.Process):
     
 
     def add_to_submap(
-        self, cur_frame_idx, occ_aware_visibility, viewpoint ):  
+        self, cur_frame_idx, viewpoint ):  
         self.active_submap.viewpoints[cur_frame_idx] = viewpoint
-        # self.active_submap.occ_aware_visibility[cur_frame_idx] = occ_aware_visibility
-        self.active_submap.kf_idx.append(cur_frame_idx)
-        
+        self.active_submap.kf_idx.append(cur_frame_idx)        
         return False
     def request_keyframe(self, cur_frame_idx, viewpoint, current_window, depthmap,kf_idx):
         msg = ["keyframe", cur_frame_idx, clone_obj(viewpoint), current_window, depthmap,kf_idx]
@@ -367,7 +387,7 @@ class FrontEnd(mp.Process):
     def request_new_submap(self, cur_frame_idx, viewpoint,depth_map):
         
         self.last_kf = self.active_submap.current_window[0]   
-        self.eval_("gpu_sub_map finish")
+        # self.eval_("gpu_sub_map finish")
         # self.check_mem("before")
         self.push_to_BA("final")
         self.submap_to_cpu(self.active_submap)   
@@ -379,7 +399,7 @@ class FrontEnd(mp.Process):
         print("[f-n]last kf = %i" % self.last_kf)
         # print("f  : tag = new map")
         self.requested_new_submap = True
-        
+        self.map_count+=1
     def request_reset_submap(self, cur_frame_idx, viewpoint,depth_map):
                  
         msg = ["reset", cur_frame_idx,viewpoint,depth_map]
@@ -431,15 +451,17 @@ class FrontEnd(mp.Process):
             self.cameras[kf_id].update_RT(kf.R.clone(), kf.T.clone())      
 
     def cleanup(self, cur_frame_idx): # R,T는 놔두고 나머지만 지움
-        self.cameras[cur_frame_idx].clean()        
+        self.cameras[cur_frame_idx].clean()               
         torch.cuda.empty_cache()
 
     def submap_to_cpu(self, submap):
         # msg = ["reset_mem"]        
         # self.backend_queue.put(msg)
-        for keys,views in submap.viewpoints.items():
-            self.cameras[keys].viewpoints_to_cpu()
-            views.viewpoints_to_cpu()
+        # for keys,views in submap.viewpoints.items():
+        #     if keys == submap.kf_idx[-1]:
+        #         continue
+        #     self.cameras[keys].viewpoints_to_cpu()
+        #     views.viewpoints_to_cpu()
         
         for idx in submap.current_window :
             submap.occ_aware_visibility[idx] = None        
@@ -568,7 +590,10 @@ class FrontEnd(mp.Process):
                     continue                
             
                 last_keyframe_idx = self.active_submap.current_window[0]
+                
                 check_time = (cur_frame_idx - last_keyframe_idx) >= self.kf_interval
+                # if self.map_count>=1:
+                #     check_time = (cur_frame_idx - last_keyframe_idx) >= 1
                 # print(cur_frame_idx - last_keyframe_idx)
         
                 curr_visibility = (render_pkg["n_touched"] > 0).long()
@@ -600,63 +625,56 @@ class FrontEnd(mp.Process):
                 #     create_kf = check_time and create_kf
                 if create_kf:
         
-                    create_new_submap = self.is_new_submap(cur_frame_idx)         
-                    if(create_new_submap):
+                            
+                    if self.monocular:
+                        depth_map = self.add_new_keyframe(cur_frame_idx, init=True)
+                    else:
+                        depth_map = self.add_new_keyframe(
+                            cur_frame_idx,                                                    
+                            depth=render_pkg["depth"],
+                            opacity=render_pkg["opacity"],
+                            init=False,
+                        )               
+                    self.add_to_submap( cur_frame_idx,                  
+                        self.cameras[cur_frame_idx]
+                        )          
+                    self.active_submap.current_window, removed = self.add_to_window(
+                        cur_frame_idx,
+                        curr_visibility,
+                        self.active_submap.occ_aware_visibility,
+                        self.active_submap.current_window,
+                    )                    
+                    if self.monocular and not self.initialized and removed is not None:
                         
-                        # # depth_map = self.add_new_keyframe(cur_frame_idx, viewpoint,depth=render_pkg["depth"], init=False)
-                        depth_map = self.add_new_keyframe(
-                            cur_frame_idx,                                                    
-                            depth=render_pkg["depth"],
-                            opacity=render_pkg["opacity"],
-                            init=False,
-                        )    
-                        d1= time.time()
-                        # depth_map = self.add_new_keyframe(cur_frame_idx, init=True)
-                        d2= time.time()
-                        self.request_new_submap(cur_frame_idx,viewpoint,depth_map)
-                        print("[new map] depth map time = "+str(d2-d1))
-                    else :
-                        self.add_to_submap( cur_frame_idx,
-                            curr_visibility,
-                            # self.occ_aware_visibility,
-                            self.cameras[cur_frame_idx]
+                        Log(
+                            "Keyframes lacks sufficient overlap to initialize the map, resetting."
                         )
-                        w1= time.time()
-                        self.active_submap.current_window, removed = self.add_to_window(
-                            cur_frame_idx,
-                            curr_visibility,
-                            self.active_submap.occ_aware_visibility,
-                            self.active_submap.current_window,
-                        )
-                        w2 =time.time()
-                        # print("window time = "+str(w2-w1))
-                        if self.monocular and not self.initialized and removed is not None:
-                            # self.reset = True
-                            Log(
-                                "Keyframes lacks sufficient overlap to initialize the map, resetting."
-                            )
-                            print("kf idx = ",end="")
-                            for i  in self.kf_indices :
-                                print(" %i"%i,end="")
-                            print("")
-                            self.reset_current_submap(cur_frame_idx, viewpoint)
-                            cur_frame_idx += 1
-                            continue    
-                        depth_map = self.add_new_keyframe(
-                            cur_frame_idx,                                                    
-                            depth=render_pkg["depth"],
-                            opacity=render_pkg["opacity"],
-                            init=False,
-                        )                           
-                                    
-                        self.request_keyframe(
-                            cur_frame_idx, viewpoint, self.active_submap.current_window, depth_map, self.active_submap.kf_idx)
-                    
                         print("kf idx = ",end="")
                         for i  in self.kf_indices :
                             print(" %i"%i,end="")
-                        print(" [%i]" %len(self.kf_indices))       
+                        print("")
+                        self.reset_current_submap(cur_frame_idx, viewpoint)
+                        cur_frame_idx += 1
+                        continue  
+                    
+                    create_new_submap = self.is_new_submap(cur_frame_idx)    
+                    
+                    if create_new_submap:  
                         self.push_to_BA("keyframe",viewpoint)
+                        self.request_new_submap(cur_frame_idx,viewpoint,depth_map)         
+                        
+                    else:
+                        self.request_keyframe(
+                            cur_frame_idx, viewpoint, self.active_submap.current_window, depth_map, self.active_submap.kf_idx)
+                        self.push_to_BA("keyframe",viewpoint)
+                        self.cleanup(cur_frame_idx)
+                        self.active_submap.viewpoints[cur_frame_idx].clean() 
+                        torch.cuda.empty_cache() 
+                    print("kf idx = ",end="")
+                    for i  in self.kf_indices :
+                        print(" %i"%i,end="")
+                    print(" [%i]" %len(self.kf_indices))       
+                    
                 
                     # self.cleanup(cur_frame_idx)
                                             

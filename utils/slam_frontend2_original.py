@@ -500,6 +500,7 @@ class FrontEnd(mp.Process):
         # viewpoint.update_RT(tmp_R,tmp_T)  
         # print(viewpoint.R)
         # print(viewpoint.T)
+        
         msg = ["new_map", cur_frame_idx,viewpoint,depth_map]
         # msg = ["new_map", cur_frame_idx,viewpoint,last_kf,depth_map]
         self.backend_queue.put(msg)
@@ -549,8 +550,7 @@ class FrontEnd(mp.Process):
                
                 self.gui_process = mp.Process(target=slam_gui.run, args=(self.params_gui,))
                 self.gui_process.start()
-                time.sleep(5)
-            
+                time.sleep(5)            
             
         else :
             
@@ -849,7 +849,7 @@ class FrontEnd(mp.Process):
                     ):
                     Log("Evaluating ATE at frame: ", cur_frame_idx)
                     # print("len of kf indices = %i "%len(self.kf_indices))
-                    self.eval_("before")
+                    # self.eval_("before")
                     eval_ate(                        
                         self.submap_list,
                         self.active_submap,

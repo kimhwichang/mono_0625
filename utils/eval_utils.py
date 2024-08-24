@@ -66,7 +66,7 @@ def evaluate_evo(poses_gt, poses_est, plot_dir, label, monocular=False,tag_ ="Ev
     plt.close() # closes the current figure
     return ape_stat
 
-def eval_ate(submap_list, sub_, save_dir, iterations, final=False, monocular=False,new_submap = False,tag="Eval"):
+def eval_ate(submap_list, sub_, save_dir, iterations, final=False, monocular=False,tag="Eval"):
     trj_data = dict()
     latest_frame_idx = sub_.kf_idx[-1] + 2 if final else sub_.kf_idx[-1] + 1
     trj_id, trj_est, trj_gt = [], [], []
@@ -86,12 +86,12 @@ def eval_ate(submap_list, sub_, save_dir, iterations, final=False, monocular=Fal
         M= M.numpy()
         pose = pose@M
         return pose
-    if tag == "before" :
-        # print("before!")
-        new_submap = False       
-    final_index = 0 
+    # if tag == "before" :
+    #     # print("before!")
+    #     new_submap = False       
+
     if(len(submap_list)==0): 
-        for kf_id in sub_.kf_idx:      
+        for kf_id in sub_.kf_idx:                
             kf = sub_.viewpoints[kf_id]
             pose_est = np.linalg.inv(gen_pose_matrix2(kf.R, kf.T,sub_.get_anchor_frame_pose()))
             # if(kf_id == sub_.kf_idx[0]):
@@ -108,7 +108,9 @@ def eval_ate(submap_list, sub_, save_dir, iterations, final=False, monocular=Fal
     else  : 
         for submap_ in submap_list:
             for kf_id in submap_.kf_idx:          
-        
+                if kf_id == submap_.kf_idx[-1]:
+                   print("num = %i "%kf_id)
+                   continue  
                 kf = submap_.viewpoints[kf_id]
                 pose_est = np.linalg.inv(gen_pose_matrix2(kf.R, kf.T,submap_.get_anchor_frame_pose()))
                 # if(kf_id == sub_.kf_idx[0]):
@@ -122,10 +124,9 @@ def eval_ate(submap_list, sub_, save_dir, iterations, final=False, monocular=Fal
                 trj_est_np.append(pose_est)
                 trj_gt_np.append(pose_gt)
 
-        if(not final and not new_submap):
+        if(not final):
             # print("not final")
-            for kf_id in sub_.kf_idx:          
-
+            for kf_id in sub_.kf_idx:                           
                 kf = sub_.viewpoints[kf_id]
                 pose_est = np.linalg.inv(gen_pose_matrix2(kf.R, kf.T,sub_.get_anchor_frame_pose()))
                 # if(kf_id == sub_.kf_idx[0]):
@@ -218,7 +219,7 @@ def eval_ate_(sub_, tag_="", save_dir = "", monocular=False):
             
     return ate
 
-def eval_ate2(frames, kf_ids, save_dir, iterations, final=False, monocular=False):
+def eval_ate2(frames, kf_ids, save_dir, iterations, final=False, monocular=True):
     trj_data = dict()
     latest_frame_idx = kf_ids[-1] + 2 if final else kf_ids[-1] + 1
     trj_id, trj_est, trj_gt = [], [], []
@@ -280,9 +281,94 @@ def eval_rendering(
     iteration="final",
 ):
     interval = 3
+    img_pred, img_gt = [], []
+    begin_idx = kf_indices[0]
+    end_idx = kf_indices[-1]
+    
+    psnr_array, ssim_array, lpips_array = [], [], []
+    cal_lpips = LearnedPerceptualImagePatchSimilarity(
+        net_type="alex", normalize=True
+    ).to("cuda")
+    # print("frame num = %i"%len(frames))
+    
+    print("gaussian num = %i " %(gaussians._xyz.shape[0]))
+    print("begin = %i , end = %i, total kf num = %i "%(begin_idx,end_idx, len(kf_indices)))
+    count = 0
+    for idx in range(begin_idx, end_idx, interval):
+        count+=1
+        if idx in kf_indices:
+            continue
+      
+        frame = frames[idx]    
+        gt_image, _, _ = dataset[idx]        
+        rendering = render(frame, gaussians, pipe, background)["render"]
+        image = torch.clamp(rendering, 0.0, 1.0)
+        im = (image.detach().cpu().numpy().transpose((1, 2, 0)) * 255).astype(np.uint8)
+        im2= cv2.cvtColor(im, cv2.COLOR_BGR2RGB)       
+        # print(iteration=="before_opt")
+        if(iteration=="before_opt"):
+            image_name = "/workspace/mono_0625/slam2/frame_%i.png"%idx 
+        elif(iteration=="final"):
+            image_name = "/workspace/MonoGS/final/frame_%i.png"%idx 
+        else :
+            image_name = "/workspace/mono_0625/slam3/frame_%i.png"%idx 
+        # print(image_name)
+        cv2.imwrite(image_name,im2)
+        gt = (gt_image.detach().cpu().numpy().transpose((1, 2, 0)) * 255).astype(np.uint8)
+
+        pred = (image.detach().cpu().numpy().transpose((1, 2, 0)) * 255).astype(
+            np.uint8
+        )     
+        gt = cv2.cvtColor(gt, cv2.COLOR_BGR2RGB)
+        pred = cv2.cvtColor(pred, cv2.COLOR_BGR2RGB)
+        img_pred.append(pred)
+        img_gt.append(gt)
+
+        mask = gt_image > 0
+
+        psnr_score = psnr((image[mask]).unsqueeze(0), (gt_image[mask]).unsqueeze(0))
+        ssim_score = ssim((image).unsqueeze(0), (gt_image).unsqueeze(0))
+        lpips_score = cal_lpips((image).unsqueeze(0), (gt_image).unsqueeze(0))
+
+        psnr_array.append(psnr_score.item())
+        ssim_array.append(ssim_score.item())
+        lpips_array.append(lpips_score.item())
+
+    output = dict()
+    output["mean_psnr"] = float(np.mean(psnr_array))
+    output["mean_ssim"] = float(np.mean(ssim_array))
+    output["mean_lpips"] = float(np.mean(lpips_array))
+    output["total frame num"] = count
+    Log(
+        f'mean psnr: {output["mean_psnr"]}, ssim: {output["mean_ssim"]}, lpips: {output["mean_lpips"]}',
+        tag="Eval",
+    )
+
+    psnr_save_dir = os.path.join(save_dir, "psnr", str(iteration))
+    mkdir_p(psnr_save_dir)
+    name_ =str(end_idx)
+    json.dump(
+        output,
+        open(os.path.join(psnr_save_dir, "result.json"), "a", encoding="utf-8"),
+        indent=4,
+    )
+    return output
+
+
+def eval_rendering2(
+    frames,  
+    gaussians,
+    dataset,
+    save_dir,
+    pipe,
+    background,
+    kf_indices,
+    iteration="final",
+):
+    interval = 3
     img_pred, img_gt, saved_frame_idx = [], [], []
     begin_idx = kf_indices[0]
-    end_idx = kf_indices[-1]-1 
+    end_idx = kf_indices[-2] 
     
     psnr_array, ssim_array, lpips_array = [], [], []
     cal_lpips = LearnedPerceptualImagePatchSimilarity(

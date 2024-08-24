@@ -196,7 +196,7 @@ class FrontEnd(mp.Process):
                 converged = update_pose(viewpoint)     
          
             if converged:
-               
+                print("[converge]trcaking_itr =  %i" %tracking_itr)  
                 break
             
             

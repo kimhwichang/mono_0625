@@ -54,73 +54,34 @@ class BackEnd(mp.Process):
         self.active_submap.occ_aware_visibility={}   
         
     def reset(self):
-   
-        # self.keyframe_optimizers = None
 
         # remove all gaussians
         self.active_submap.reset()
-        self.active_submap = None   
-   
-    def color_refinement(self , iteration_total):
-        Log("Starting color refinement")
+        self.active_submap = None     
+       
 
-        for iteration in tqdm(range(1, iteration_total + 1)):
-            viewpoint_idx_stack = list(self.active_submap.viewpoints.keys())
-            viewpoint_cam_idx = viewpoint_idx_stack.pop(
-                random.randint(0, len(viewpoint_idx_stack) - 1)
-            )
-            # print(viewpoint_cam_idx)
-            
-            viewpoint_cam = self.active_submap.viewpoints[viewpoint_cam_idx]
-            render_pkg = render(
-                viewpoint_cam, self.active_submap.gaussians, self.pipeline_params, self.active_submap.background
-            )
-            image, visibility_filter, radii = (
-                render_pkg["render"],
-                render_pkg["visibility_filter"],
-                render_pkg["radii"],
-            )
-
-            gt_image = viewpoint_cam.original_image.cuda()
-            Ll1 = l1_loss(image, gt_image)
-            loss = (1.0 - self.opt_params.lambda_dssim) * (
-                Ll1
-            ) + self.opt_params.lambda_dssim * (1.0 - ssim(image, gt_image))
-            loss.backward()
-            with torch.no_grad():
-                self.active_submap.gaussians.max_radii2D[visibility_filter] = torch.max(
-                    self.active_submap.gaussians.max_radii2D[visibility_filter],
-                    radii[visibility_filter],
-                )
-                self.active_submap.gaussians.optimizer.step()
-                self.active_submap.gaussians.optimizer.zero_grad(set_to_none=True)
-                self.active_submap.gaussians.update_learning_rate(iteration)
-        Log("Map refinement done")        
-    
-
-    def initialize_sub_map(self, viewpoint, first_ = True): # ,last_kf = None):
+    def initialize_sub_map(self, viewpoint, first_ = True):
         if (first_):    
            
             self.active_submap = Submap(self.config,self.device,self.submap_id,first_)
+            
             self.active_submap.initialize_(viewpoint)
             # self.global_pose_list.append(self.active_submap.get_anchor_frame_pose())
             # self.submap_list.append(self.active_submap)
             
         else :
                     
-            last_pose = self.active_submap.get_anchor_frame_pose() 
-            self.submap_to_cpu(self.active_submap)
+            last_pose = self.active_submap.get_anchor_frame_pose()             
+          
             # r1 = time.time()
             # # self.reset()
             # r2= time.time()
             # print("reset time = %s"%str(r2-r1))
-            self.active_submap = Submap(self.config,self.device,self.submap_id,first_)
-            self.active_submap.initialize_(viewpoint,last_pose)#,last_kf)           
+            self.active_submap = Submap(self.config,self.device,self.submap_id,first_)            
+            self.active_submap.initialize_(viewpoint,last_pose)           
             #self.global_pose_list.append(self.active_submap.get_anchor_frame_pose())
       
-    def initialize_map(self,viewpoint):      
-        # ck = True
-        # for idx, viewpoint in self.active_submap.viewpoints.items():
+    def initialize_map(self,viewpoint):       
         for mapping_iteration in range(self.active_submap.init_itr_num):
             self.iteration_count += 1
             render_pkg = render(
@@ -155,7 +116,7 @@ class BackEnd(mp.Process):
                 self.active_submap.gaussians.add_densification_stats(
                     viewspace_point_tensor, visibility_filter
                 )
-                if mapping_iteration % self.active_submap.init_gaussian_update == 0 :#and ck:
+                if mapping_iteration % self.active_submap.init_gaussian_update == 0 :
                     self.active_submap.gaussians.densify_and_prune(
                         self.opt_params.densify_grad_threshold,
                         self.active_submap.init_gaussian_th,
@@ -169,17 +130,13 @@ class BackEnd(mp.Process):
                     self.active_submap.gaussians.reset_opacity()
 
                 self.active_submap.gaussians.optimizer.step()
-                self.active_submap.gaussians.optimizer.zero_grad(set_to_none=True)
-        # ck = False  
-        # print("f gaussian num = %i" %len(self.active_submap.gaussians._xyz))
-        # print(n_touched.shape)  
+                self.active_submap.gaussians.optimizer.zero_grad(set_to_none=True)      
         self.active_submap.occ_aware_visibility[viewpoint.uid] = (n_touched > 0).long()                              
 
         Log("Initialized sub map %i "%self.submap_id)
             # to do - 이전 gaussian 추종 
         self.submap_id+=1
         return render_pkg
-         
          
     def map(self, submap, prune=False, iters=1):
         # print("map! last_sent =%i "%self.last_sent )
@@ -409,15 +366,6 @@ class BackEnd(mp.Process):
             total_view.append(kf)
         return total_view
 
-    def submap_to_cpu(self, submap):
-        for views in submap.viewpoints.values():
-            views.viewpoints_to_cpu()
-        
-        for idx in submap.current_window :
-            submap.occ_aware_visibility[idx] = None        
-            torch.cuda.empty_cache()
-        submap.gaussians.reset() 
-    
     def check_mem(self,tag):
         print( tag+ f" Reserved Memory : {torch.cuda.memory_reserved()/1024.0/1024.0:.2f}MB" )
         print( tag+ f" Allocated Memory : {torch.cuda.memory_allocated()/1024.0/1024.0:.2f}MB")
@@ -438,7 +386,6 @@ class BackEnd(mp.Process):
             kf = self.active_submap.viewpoints[kf_idx]
             keyframes.append((kf_idx, kf.R.clone().to("cpu"), kf.T.clone().to("cpu")))
       
-        last_ = self.active_submap.current_window[0]      
         if(tag=="init" or tag=="new_map" or tag=="reset"):
             # print("bb : tag = "+tag)  
             msg = [tag, clone_obj(self.active_submap)]
@@ -499,19 +446,15 @@ class BackEnd(mp.Process):
                 elif data[0] == "new_map":
                     cur_frame_idx = data[1]
                     viewpoint = data[2]
-                    depth_map = data[3]
+                    depth_map = data[3]                    
                     self.iteration_count = 0
                     self.last_sent = 0
                     self.initialized = not self.monocular
-                    self.submap_init = False
-                    # self.submap_list.append(self.active_submap)                    
-                    n1 =time.time()       
-                        
-                    self.initialize_sub_map(viewpoint,False)  
-               
+                    self.submap_init = False              
+                    n1 =time.time()               
+                    self.initialize_sub_map(viewpoint,False)                   
                     self.add_next_kf(
-                        cur_frame_idx, viewpoint, depth_map=depth_map, init=True
-                    )                                  
+                        cur_frame_idx, viewpoint, depth_map=depth_map )                                                          
                     self.initialize_map(viewpoint)                                                       
                     self.push_to_frontend("new_map")
                     n2 =time.time()
@@ -650,7 +593,6 @@ class BackEnd(mp.Process):
                     # self.check_mem("after_kf back3")
                     self.push_to_frontend("keyframe")
                     k2 = time.time()   
-                    self.active_submap.viewpoints[cur_frame_idx].img_to_cpu()
                     torch.cuda.empty_cache()     
                     # print("")   
                     # print("km1 time = "+str(km2-km1))

@@ -138,7 +138,7 @@ class SLAM:
                 self.pipeline_params,
                 self.background,
                 kf_indices=kf_indices,
-                iteration="final",
+                iteration="inal",
             )
             columns = ["tag", "psnr", "ssim", "lpips", "RMSE ATE", "FPS"]
             metrics_table = wandb.Table(columns=columns)

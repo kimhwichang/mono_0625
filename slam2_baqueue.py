@@ -58,6 +58,7 @@ class SLAM:
         # bg_color = [0, 0, 0]
         # self.background = torch.tensor(bg_color, dtype=torch.float32, device="cuda")
         self.submap_list = []
+        # manager= mp.Manager()
         frontend_queue = mp.Queue()
         backend_queue = mp.Queue()
         before_BA_queue = mp.Queue()        

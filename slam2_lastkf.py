@@ -16,12 +16,12 @@ from gaussian_splatting.utils.system_utils import mkdir_p
 from gui import gui_utils, slam_gui
 from utils.config_utils import load_config
 from utils.dataset import load_dataset
-from utils.eval_utils import eval_ate, eval_rendering, save_gaussians_
+from utils.eval_utils import eval_ate, eval_rendering2, save_gaussians_
 from utils.logging_utils import Log
 from gaussian_splatting.utils.loss_utils import l1_loss, ssim
 from utils.multiprocessing_utils import FakeQueue
-from utils.slam_backend2 import BackEnd
-from utils.slam_frontend2 import FrontEnd
+from utils.slam_backend2_lastkf import BackEnd
+from utils.slam_frontend2_lastkf import FrontEnd
 
 
 
@@ -129,7 +129,7 @@ class SLAM:
                 self.gaussians = submap_.gaussians
                 kf_indices = submap_.kf_idx    
                 # anchor_frame_matrix = submap_.get_anchor_frame_pose()
-                rendering_result = eval_rendering(
+                rendering_result = eval_rendering2(
                     self.frontend.cameras,
                     # anchor_frame_matrix,
                     self.gaussians,

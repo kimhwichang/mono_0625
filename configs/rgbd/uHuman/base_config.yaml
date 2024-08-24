@@ -3,7 +3,7 @@ Results:
   save_results: True
   save_dir: "results"
   save_trj: True
-  save_trj_kf_intv: 5
+  save_trj_kf_intv: 1
   use_gui: False
   eval_rendering: True
   use_wandb: False
@@ -33,7 +33,7 @@ Training:
   gaussian_reset: 2001
   size_threshold: 20
   kf_interval: 5
-  max_kf_size: 45
+  max_kf_size: 60
   window_size: 8
   pose_window: 3
   edge_threshold: 1.1

@@ -180,7 +180,39 @@ class Camera(nn.Module):
         self.exposure_a = None
         self.exposure_b = None
     
-   
+    # def to_gpu(self) :
+        
+    #     self._xyz = nn.Parameter(
+    #         torch.tensor(self._xyz, dtype=torch.float, device="cuda").requires_grad_(True)
+    #     )
+    #     self._features_dc = nn.Parameter(
+    #         torch.tensor(self._features_dc, dtype=torch.float, device="cuda")
+            
+    #         .contiguous()
+    #         .requires_grad_(True)
+    #     )
+    #     self._features_rest = nn.Parameter(
+    #         torch.tensor(self._features_rest, dtype=torch.float, device="cuda")      
+    #         .contiguous()
+    #         .requires_grad_(True)
+    #     )
+    #     self._opacity = nn.Parameter(
+    #         torch.tensor(self._opacity, dtype=torch.float, device="cuda").requires_grad_(
+    #             True
+    #         )
+    #     )
+    #     self._scaling = nn.Parameter(
+    #         torch.tensor(self._scaling, dtype=torch.float, device="cuda").requires_grad_(True)
+    #     )
+    #     self._rotation = nn.Parameter(
+    #         torch.tensor(self._rotation, dtype=torch.float, device="cuda").requires_grad_(True)
+    #     ) 
+    def viewpoints_to_gpu(self):
+        self.cam_rot_delta = self.cam_rot_delta.requires_grad_(True)
+        self.cam_trans_delta = self.cam_trans_delta.requires_grad_(True)
+        self.exposure_a = self.exposure_a.requires_grad_(True)
+        self.exposure_b = self.exposure_b.requires_grad_(True)  
+
     def viewpoints_to_cpu(self):
         tmp_original_image = self.original_image.detach().to("cpu")
         tmp_cam_rot_delta = self.cam_rot_delta.detach().to("cpu")
@@ -208,28 +240,26 @@ class Camera(nn.Module):
         self.R = tmp_R
         self.T = tmp_T
         self.grad_mask= tmp_grad_mask
+    
+    def img_to_cpu(self):
+        tmp_original_image = self.original_image.detach().to("cpu")
+        # tmp_cam_rot_delta = self.cam_rot_delta.detach().to("cpu")
+        # tmp_cam_trans_delta = self.cam_trans_delta.detach().to("cpu")
+        # tmp_exposure_a = self.exposure_a.detach().to("cpu")
+        # tmp_exposure_b = self.exposure_b.detach().to("cpu")
+        # tmp_R = self.R.detach().to("cpu")
+        # tmp_T = self.T.detach().to("cpu")
+        # tmp_grad_mask = self.grad_mask.detach().to("cpu")
+        del self.original_image       
+        torch.cuda.empty_cache()
+        gc.collect()
+        self.original_image = tmp_original_image      
         
-    def clean2(self):
-        self.original_image.to("cpu")
-        torch.cuda.empty_cache()
-        gc.collect()
-        self.original_image = None
-        self.depth = None
-        self.grad_mask = None
-        
-        self.cam_rot_delta.to("cpu")
-        torch.cuda.empty_cache()
-        gc.collect()
-        self.cam_trans_delta.to("cpu")
-        torch.cuda.empty_cache()
-        gc.collect()
-        self.exposure_a.to("cpu")
-        torch.cuda.empty_cache()
-        gc.collect()
-        self.exposure_b.to("cpu")
-        torch.cuda.empty_cache()
-        gc.collect()
-        self.cam_rot_delta = None
-        self.cam_trans_delta = None
-        self.exposure_a = None
-        self.exposure_b = None
+    # def clean2(self):
+    #     self.original_image.to("cpu")
+    #     self.original_image = None       
+    #     self.cam_rot_delta.detach().to("cpu")   
+    #     self.cam_trans_delta.detach().to("cpu")
+    #     self.exposure_a.detach().to("cpu")
+    #     self.exposure_b.detach().to("cpu")
+ 
