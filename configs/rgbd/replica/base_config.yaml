@@ -45,7 +45,7 @@ Training:
   gaussian_reset: 2001
   size_threshold: 20
   kf_interval: 4
-  max_kf_size: 60
+  max_kf_size: 90
   window_size: 10
   pose_window: 5
   edge_threshold: 4

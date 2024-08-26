@@ -557,7 +557,7 @@ class FrontEnd(mp.Process):
             self.active_submap.gaussians = data[1]    
             self.active_submap.occ_aware_visibility  = data[2]           
             keyframes = data[3]
-            self.last_kf = self.active_submap.current_window[0]       
+            # self.last_kf = self.active_submap.current_window[0]       
         
             for kf_id, kf_R, kf_T in keyframes:
                 # if kf_id == self.active_submap.kf_idx[0] :
@@ -759,10 +759,10 @@ class FrontEnd(mp.Process):
                     point_ratio = intersection / union
                     print("point_ratio = %f , check_time= %i" %(point_ratio,check_time))
                     create_kf = (
-                        check_time #and point_ratio < self.config["Training"]["kf_overlap"]
+                        check_time and point_ratio < self.config["Training"]["kf_overlap"]
                     )
                 if not create_kf :
-                   create_kf = ( (cur_frame_idx - last_keyframe_idx) >= 15 )      
+                   create_kf = ( (cur_frame_idx - last_keyframe_idx) >= 8 )      
                 if create_kf:                
                     create_new_submap = self.is_new_submap(cur_frame_idx)         
                  
@@ -818,7 +818,7 @@ class FrontEnd(mp.Process):
                 
                 if (
                     self.save_results
-                    and len(self.kf_indices) >=5
+                    and len(self.active_submap.kf_idx) >=4
                     and not create_new_submap
                     and self.save_trj
                     and create_kf
@@ -843,19 +843,19 @@ class FrontEnd(mp.Process):
                     duration = tic.elapsed_time(toc)
                     time.sleep(max(0.01, 1.0 / 3.0 - duration / 1000))
             else:
-                print("b num of queue = %i " %self.frontend_queue.qsize())
-                data = None
-                if (self.frontend_queue.qsize() ==1):
-                    data = self.frontend_queue.get()    
-                while self.frontend_queue.qsize() >=1 :
-                    data = self.frontend_queue.get()
-                    if data[0]=="sync_backend":
-                        continue
-                    else :
-                        break                
-                print("a num of queue = %i, tag = %s " %(self.frontend_queue.qsize(),data[0]))
+                # print("b num of queue = %i " %self.frontend_queue.qsize())
+                # data = None
+                # if (self.frontend_queue.qsize() ==1):
+                #     data = self.frontend_queue.get()    
+                # while self.frontend_queue.qsize() >=1 :
+                #     data = self.frontend_queue.get()
+                #     if data[0]=="sync_backend":
+                #         continue
+                #     else :
+                #         break                
+                # print("a num of queue = %i, tag = %s " %(self.frontend_queue.qsize(),data[0]))
                 
-                # data = self.frontend_queue.get()
+                data = self.frontend_queue.get()
                 if data[0] == "sync_backend":
                     print("bf : tag = sync_backend")
                     self.sync_backend(data)
@@ -875,13 +875,7 @@ class FrontEnd(mp.Process):
                     self.sync_backend(data)
                     self.requested_new_submap = False 
                     self.initialized = not self.monocular      
-                
-                elif data[0] == "refine":
-                    print("bf : tag = refine")
-                    self.sync_backend(data)                  
-                    self.eval_("after")
-                    print("-"*60)
-                    
+                            
                 elif data[0] == "reset":
                     print("bf : tag = reset")
                     self.sync_backend(data)

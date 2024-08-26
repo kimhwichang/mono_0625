@@ -103,7 +103,7 @@ namespace glm {
 		using _internal_::transferSign;
 		using _internal_::pythag;
 
-		T a[D * D]; // matrix -- input and workspace for algorithm (will be changed inplace)
+		T a[D * D]; // matrix -- input and media/hcschool/GG for algorithm (will be changed inplace)
 		T d[D]; // diagonal elements
 		T e[D]; // off-diagonal elements
 

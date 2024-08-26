@@ -101,8 +101,7 @@ class GaussianModel:
         self.max_radii2D = tmp_max_radii2D
         self.xyz_gradient_accum = tmp_xyz_gradient_accum
         torch.cuda.empty_cache()
-        gc.collect()
-    
+           
     # def to_gpu(self) :
         
     #     self._xyz = nn.Parameter(
@@ -132,12 +131,19 @@ class GaussianModel:
     #     ) 
     def to_gpu(self) :
         
-        self._xyz = self._xyz.clone().detach().requires_grad_(True)        
-        self._features_dc = self._features_dc.clone().detach().requires_grad_(True)
-        self._features_rest =self._features_rest.clone().detach().requires_grad_(True)
-        self._opacity =self._opacity.clone().detach().requires_grad_(True)
-        self._scaling = self._scaling.clone().detach().requires_grad_(True)
-        self._rotation = self._rotation.clone().detach().requires_grad_(True)
+        # self._xyz = self._xyz.clone().detach().requires_grad_(True)        
+        # self._features_dc = self._features_dc.clone().detach().requires_grad_(True)
+        # self._features_rest =self._features_rest.clone().detach().requires_grad_(True)
+        # self._opacity =self._opacity.clone().detach().requires_grad_(True)
+        # self._scaling = self._scaling.clone().detach().requires_grad_(True)
+        # self._rotation = self._rotation.clone().detach().requires_grad_(True)
+        
+        self._xyz = self._xyz.clone().to(device= "cuda")       
+        self._features_dc = self._features_dc.to(device= "cuda")     
+        self._features_rest =self._features_rest.to(device= "cuda")     
+        self._opacity =self._opacity.to(device= "cuda")     
+        self._scaling = self._scaling.to(device= "cuda")     
+        self._rotation = self._rotation.to(device= "cuda")     
             
     def training_setup_ba(self, training_args):
         self.percent_dense = training_args.percent_dense

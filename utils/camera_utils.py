@@ -243,18 +243,17 @@ class Camera(nn.Module):
     
     def img_to_cpu(self):
         tmp_original_image = self.original_image.detach().to("cpu")
-        # tmp_cam_rot_delta = self.cam_rot_delta.detach().to("cpu")
-        # tmp_cam_trans_delta = self.cam_trans_delta.detach().to("cpu")
-        # tmp_exposure_a = self.exposure_a.detach().to("cpu")
-        # tmp_exposure_b = self.exposure_b.detach().to("cpu")
-        # tmp_R = self.R.detach().to("cpu")
-        # tmp_T = self.T.detach().to("cpu")
-        # tmp_grad_mask = self.grad_mask.detach().to("cpu")
-        del self.original_image       
+        # tmp_projection_matrix = self.projection_matrix.detach().to("cpu")
+        del self.original_image
+        # del self.projection_matrix       
         torch.cuda.empty_cache()
-        gc.collect()
-        self.original_image = tmp_original_image      
-        
+        self.original_image = tmp_original_image 
+
+    def to_gpu(self):
+        self.original_image = self.original_image.to(device=self.device)
+        self.R = self.R.to(device=self.device)
+        self.T = self.T.to(device=self.device)
+   
     # def clean2(self):
     #     self.original_image.to("cpu")
     #     self.original_image = None       

@@ -12,6 +12,8 @@ from evo.tools import plot
 from evo.tools.plot import PlotMode
 from evo.tools.settings import SETTINGS
 from matplotlib import pyplot as plt
+import matplotlib
+matplotlib.use('Agg')
 from torchmetrics.image.lpip import LearnedPerceptualImagePatchSimilarity
 
 import wandb
@@ -140,6 +142,19 @@ def eval_ate(submap_list, sub_, save_dir, iterations, final=False, monocular=Fal
                 trj_est_np.append(pose_est)
                 trj_gt_np.append(pose_gt)
     # print("len trj = %i " %len(trj_est_np))
+    
+    file_name = './test.txt'
+
+    with open(file_name, 'w') as file:
+        for i in trj_est:
+            pose_list = []
+            pose =""
+            pose_list = pose_list+i[0]+i[1]+i[2]+i[3]
+            pose = "".join(str(round(float(e),6))+" " for e in pose_list)
+            # print(pose)
+            file.write(pose+"\n")
+
+
     trj_data["trj_id"] = trj_id
     trj_data["trj_est"] = trj_est
     trj_data["trj_gt"] = trj_gt
@@ -156,19 +171,19 @@ def eval_ate(submap_list, sub_, save_dir, iterations, final=False, monocular=Fal
     ) as f:
         json.dump(trj_data, f, indent=4)
 
-    ate = evaluate_evo(
-        poses_gt=trj_gt_np,
-        poses_est=trj_est_np,
-        plot_dir=plot_dir,
-        label=label_evo,
-        monocular=monocular,
-        tag_=tag
-    )
-    with open(os.path.join(pose_dir,"pose_timeline.txt"),"a",encoding="utf-8") as f:
-        f.write(str(iterations) +" : "+str(round(ate,6))+"\n")
+    # ate = evaluate_evo(
+    #     poses_gt=trj_gt_np,
+    #     poses_est=trj_est_np,
+    #     plot_dir=plot_dir,
+    #     label=label_evo,
+    #     monocular=monocular,
+    #     tag_=tag
+    # )
+    # with open(os.path.join(pose_dir,"pose_timeline.txt"),"a",encoding="utf-8") as f:
+    #     f.write(str(iterations) +" : "+str(round(ate,6))+"\n")
     # wandb.log({"frame_idx": latest_frame_idx, "ate": ate})
             
-    return ate
+    return 0 #ate
 
 def eval_ate_(sub_, tag_="", save_dir = "", monocular=False):
    
@@ -279,6 +294,7 @@ def eval_rendering(
     background,
     kf_indices,
     iteration="final",
+    opt_params = None,
 ):
     interval = 3
     img_pred, img_gt = [], []
@@ -297,23 +313,24 @@ def eval_rendering(
     for idx in range(begin_idx, end_idx, interval):
         count+=1
         if idx in kf_indices:
-            continue
+            continue    
       
         frame = frames[idx]    
-        gt_image, _, _ = dataset[idx]        
+             
         rendering = render(frame, gaussians, pipe, background)["render"]
         image = torch.clamp(rendering, 0.0, 1.0)
         im = (image.detach().cpu().numpy().transpose((1, 2, 0)) * 255).astype(np.uint8)
         im2= cv2.cvtColor(im, cv2.COLOR_BGR2RGB)       
         # print(iteration=="before_opt")
         if(iteration=="before_opt"):
-            image_name = "/workspace/mono_0625/slam2/frame_%i.png"%idx 
+            image_name = "/home/hcschool/mono_0625/slam2/frame_%i.png"%idx 
         elif(iteration=="final"):
-            image_name = "/workspace/MonoGS/final/frame_%i.png"%idx 
+            image_name = "/media/hcschool/GG/MonoGS/final/frame_%i.png"%idx 
         else :
-            image_name = "/workspace/mono_0625/slam3/frame_%i.png"%idx 
+            image_name = "/media/hcschool/GG/mono_0625/slam3/frame_%i.png"%idx 
         # print(image_name)
         cv2.imwrite(image_name,im2)
+        gt_image, _, _ = dataset[idx]
         gt = (gt_image.detach().cpu().numpy().transpose((1, 2, 0)) * 255).astype(np.uint8)
 
         pred = (image.detach().cpu().numpy().transpose((1, 2, 0)) * 255).astype(
@@ -375,7 +392,7 @@ def eval_rendering2(
         net_type="alex", normalize=True
     ).to("cuda")
     # print("frame num = %i"%len(frames))
-    
+    # gaussians.to_gpu()
     print("gaussian num = %i " %(gaussians._xyz.shape[0]))
     print("begin = %i , end = %i, total kf num = %i "%(begin_idx,end_idx, len(kf_indices)))
     count = 0
@@ -386,18 +403,19 @@ def eval_rendering2(
         saved_frame_idx.append(idx)
         frame = frames[idx]
     
-        gt_image, _, _ = dataset[idx]        
+        gt_image, _, _ = dataset[idx]      
+          
         rendering = render(frame, gaussians, pipe, background)["render"]
         image = torch.clamp(rendering, 0.0, 1.0)
         im = (image.detach().cpu().numpy().transpose((1, 2, 0)) * 255).astype(np.uint8)
         im2= cv2.cvtColor(im, cv2.COLOR_BGR2RGB)       
         # print(iteration=="before_opt")
         if(iteration=="before_opt"):
-            image_name = "/workspace/MonoGS/slam2/frame_%i.png"%idx 
+            image_name = "/media/hcschool/GG/MonoGS/slam2/frame_%i.png"%idx 
         elif(iteration=="final"):
-            image_name = "/workspace/MonoGS/final/frame_%i.png"%idx 
+            image_name = "/media/hcschool/GG/MonoGS/final/frame_%i.png"%idx 
         else :
-            image_name = "/workspace/MonoGS/slam/frame_%i.png"%idx 
+            image_name = "/media/hcschool/GG/MonoGS/slam/frame_%i.png"%idx 
         # print(image_name)
         cv2.imwrite(image_name,im2)
         gt = (gt_image.detach().cpu().numpy().transpose((1, 2, 0)) * 255).astype(np.uint8)

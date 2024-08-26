@@ -295,7 +295,7 @@ class FrontEnd(mp.Process):
         
         # if(cur_frame_idx % 352 ==0 ):
         #     return True      
-        if (self.active_submap.get_submap_size()>=self.max_kf_size) and ( (len(self.dataset)-cur_frame_idx)>= self.max_kf_size*self.kf_interval)  :
+        if (self.active_submap.get_submap_size()>=self.max_kf_size) and ( (len(self.dataset)-cur_frame_idx)>= self.max_kf_size*self.kf_interval/2.0)  :
             print("active map size exceed max kf size %i , create new sub map!"%self.active_submap.get_submap_size())
             return True  
 
@@ -460,9 +460,7 @@ class FrontEnd(mp.Process):
         # for keys,views in submap.viewpoints.items():
         #     if keys == submap.kf_idx[-1]:
         #         continue
-        #     self.cameras[keys].viewpoints_to_cpu()
-        #     views.viewpoints_to_cpu()
-        
+        #     views.viewpoints_to_cpu()        
         for idx in submap.current_window :
             submap.occ_aware_visibility[idx] = None        
             torch.cuda.empty_cache()
@@ -616,10 +614,10 @@ class FrontEnd(mp.Process):
                     point_ratio = intersection / union
                     # print("point_ratio = %f , check_time= %i" %(point_ratio,check_time))
                     create_kf = (
-                        check_time #and point_ratio < self.config["Training"]["kf_overlap"]
+                        check_time and point_ratio < self.config["Training"]["kf_overlap"]
                     )
                 if not create_kf :
-                    create_kf = ( (cur_frame_idx - last_keyframe_idx) >= 15 )
+                    create_kf = ( (cur_frame_idx - last_keyframe_idx) >= 8 )
                 # print("kf test2 = %r"%create_kf)
                 # if self.single_thread:
                 #     create_kf = check_time and create_kf
@@ -673,7 +671,8 @@ class FrontEnd(mp.Process):
                     print("kf idx = ",end="")
                     for i  in self.kf_indices :
                         print(" %i"%i,end="")
-                    print(" [%i]" %len(self.kf_indices))       
+                    print(" [%i]" %len(self.kf_indices))     
+                    # print(" kf idx [%i]" %len(self.kf_indices))       
                     
                 
                     # self.cleanup(cur_frame_idx)
@@ -713,18 +712,18 @@ class FrontEnd(mp.Process):
                     time.sleep(max(0.01, 1.0 / 3.0 - duration / 1000))
             else:
                 # print("b num of queue = %i " %self.frontend_queue.qsize())
-                data = None
-                if (self.frontend_queue.qsize() ==1):
-                    data = self.frontend_queue.get()    
-                while self.frontend_queue.qsize() >=1 :
-                    data = self.frontend_queue.get()
-                    if data[0]=="sync_backend":
-                        continue
-                    else :
-                        break                
+                # data = None
+                # if (self.frontend_queue.qsize() ==1):
+                #     data = self.frontend_queue.get()    
+                # while self.frontend_queue.qsize() >=1 :
+                #     data = self.frontend_queue.get()
+                #     if data[0]=="sync_backend":
+                #         continue
+                #     else :
+                #         break                
                 # print("a num of queue = %i, tag = %s " %(self.frontend_queue.qsize(),data[0]))
                 
-                # data = self.frontend_queue.get()
+                data = self.frontend_queue.get()
                 if data[0] == "sync_backend":
                     print("bf : tag = sync_backend")
                     self.sync_backend(data)

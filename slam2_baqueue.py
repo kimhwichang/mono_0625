@@ -16,7 +16,7 @@ from gaussian_splatting.utils.system_utils import mkdir_p
 from gui import gui_utils, slam_gui
 from utils.config_utils import load_config
 from utils.dataset import load_dataset
-from utils.eval_utils import eval_ate, eval_rendering, save_gaussians
+from utils.eval_utils import eval_ate, eval_rendering, save_gaussians,save_gaussians_
 from utils.logging_utils import Log
 from gaussian_splatting.utils.loss_utils import l1_loss, ssim
 from utils.multiprocessing_utils import FakeQueue
@@ -75,6 +75,7 @@ class SLAM:
         self.BA.before_ba_queue = before_BA_queue
         self.BA.pipeline_params = self.pipeline_params
         self.BA.dataset = self.dataset
+        
 
         self.frontend.dataset = clone_obj(self.dataset)
         self.frontend.pipeline_params = self.pipeline_params
@@ -130,7 +131,7 @@ class SLAM:
             total_lpips = 0
             total_frame_num = 0
             for submap_ in self.BA.submap_list:              
-        
+                submap_.gaussians.to_gpu()
                 rendering_result = eval_rendering(
                     self.BA.cameras,                 
                     submap_.gaussians,
@@ -140,11 +141,14 @@ class SLAM:
                     submap_.background,
                     kf_indices=submap_.kf_idx ,
                     iteration="before_opt",
+                    opt_params = self.opt_params
                 )
                 total_psnr+=rendering_result["mean_psnr"]*rendering_result["total frame num"]
                 total_ssim +=rendering_result["mean_ssim"]*rendering_result["total frame num"]
                 total_lpips +=rendering_result["mean_lpips"]*rendering_result["total frame num"]  
                 total_frame_num +=rendering_result["total frame num"]
+                save_gaussians_(submap_.gaussians, self.save_dir, submap_.uid, final=False)
+                submap_.gaussians.reset()
             columns = ["tag", "psnr", "ssim", "lpips", "RMSE ATE", "FPS"]
             metrics_table = wandb.Table(columns=columns)
             metrics_table.add_data(

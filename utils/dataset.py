@@ -21,7 +21,7 @@ class ReplicaParser:
         self.input_folder = input_folder
         self.color_paths = sorted(glob.glob(f"{self.input_folder}/results/frame*.jpg"))
         self.depth_paths = sorted(glob.glob(f"{self.input_folder}/results/depth*.png"))
-        # self.n_img = len(self.color_paths[:300])
+        # self.n_img = len(self.color_paths[:30])
         self.n_img = len(self.color_paths)
         print(self.n_img)
         self.load_poses(f"{self.input_folder}/traj.txt")
@@ -88,7 +88,7 @@ class TUMParser:
 
         image_data = self.parse_list(image_list)
         depth_data = self.parse_list(depth_list)
-        # pose_list = "/workspace/Data/TUM/rgbd_dataset_freiburg2_xyz/groundtruth.txt"
+        # pose_list = "/media/hcschool/GG/Data/TUM/rgbd_dataset_freiburg2_xyz/groundtruth.txt"
         pose_data = self.parse_list(pose_list, skiprows=1)
         pose_vecs = pose_data[:, 0:].astype(np.float64)
 
@@ -208,8 +208,8 @@ class uHumanParser:
     def load_poses(self, datapath, frame_rate=-1):
         # if os.path.isfile(os.path.join(datapath, "gt_trans_a1_rgbd.txt")):
         #     pose_list = os.path.join(datapath, "gt_trans_a1_rgbd.txt")
-        if os.path.isfile(os.path.join(datapath, "associated_gt.txt")):
-            pose_list = os.path.join(datapath, "associated_gt.txt")
+        if os.path.isfile(os.path.join(datapath, "associated_gt_align.txt")):
+            pose_list = os.path.join(datapath, "associated_gt_align.txt")
         # if os.path.isfile(os.path.join(datapath, "reverse_gt.txt")):
         #     pose_list = os.path.join(datapath, "reverse_gt.txt")
         img_path = os.path.join(datapath,"left")
@@ -223,7 +223,7 @@ class uHumanParser:
         pose_vecs = pose_data[:, 0:].astype(np.float64)
         self.color_paths, self.poses, self.depth_paths, self.frames = [], [], [], []
 
-        for i in range(num_data-2):#(720,1400):(522,1000):#
+        for i in range(300):#3000):#num_data-2):#(720,1400):(522,1000):#
             
             j = 1778-i
             self.color_paths += [os.path.join(img_path, img_list[i])]
